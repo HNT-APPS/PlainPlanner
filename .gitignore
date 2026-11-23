@@ -1,0 +1,14 @@
+# Plugin runtime state (never publish anyone's vault data)
+data.json
+backups/
+
+# Private working notes, kept out of the public repo
+CLAUDE.md
+PLAN.pl.md
+
+# Tooling
+node_modules/
+*.log
+.DS_Store
+.vscode/
+.idea/
