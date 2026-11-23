@@ -8,6 +8,10 @@ There are no calendar views, colors or timelines: just a simple, step-by-step li
 
 The interface and the note format will be available in English and Polish.
 
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 Copyright (C) 2026 HNT Apps
