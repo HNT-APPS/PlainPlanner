@@ -110,6 +110,14 @@ function nameIndex(s, list) {
 function monthFromName(s) {
   return nameIndex(s, 'months') + 1;
 }
+// A month header of TODO DAILY: "GRUDZIEŃ 2027" (or, in older notes, just
+// "GRUDZIEŃ"). Returns { m, y } with y null when no year is written, or null.
+function monthHeaderInfo(s) {
+  const hm = /^(.*?)\s+(\d{4})$/.exec(normName(s));
+  const m = monthFromName(hm ? hm[1] : s);
+  if (!m) return null;
+  return { m, y: hm ? +hm[2] : null };
+}
 function weekdayFromName(s) {
   return nameIndex(s, 'weekdays');
 }
@@ -433,7 +441,7 @@ function ensureSection(model, y, m) {
   let s = getSection(model, y, m, false);
   if (!s) {
     s = getSection(model, y, m, true);
-    s.header = `## **${langOf(model.lang).months[m - 1]}**`;
+    s.header = `## **${langOf(model.lang).months[m - 1]} ${y}**`;
   }
   return s;
 }
@@ -474,14 +482,15 @@ function parseDaily(text, today, lang) {
       continue;
     }
     const mh = /^##(?!#)\s*(.*)$/.exec(line);
-    if (curSec && /^#{1,2}\s+\S/.test(line) && !(mh && monthFromName(mh[1]))) {
+    const mi = mh && monthHeaderInfo(mh[1]);
+    if (curSec && /^#{1,2}\s+\S/.test(line) && !mi) {
       target = model.tail;
       target.push(line);
       continue;
     }
-    if (mh && monthFromName(mh[1])) {
-      const m = monthFromName(mh[1]);
-      const sec = getSection(model, resolveYear(m, 15, today), m, true);
+    if (mi) {
+      const m = mi.m;
+      const sec = getSection(model, mi.y || resolveYear(m, 15, today), m, true);
       if (!sec.header) sec.header = line;
       curSec = sec;
       target = sec.intro;
@@ -492,7 +501,8 @@ function parseDaily(text, today, lang) {
       const d = +dh[1];
       const m = +dh[2];
       if (m >= 1 && m <= 12 && d >= 1) {
-        const y = resolveYear(m, d, today);
+        // A day under its own month takes that month's year.
+        const y = curSec && curSec.m === m ? curSec.y : resolveYear(m, d, today);
         if (d <= daysInMonth(y, m)) {
           const sec = getSection(model, y, m, true);
           let day = sec.days.get(d);
@@ -536,10 +546,11 @@ function dayHeading(y, m, d, label, lang) {
   return label ? `${base} - ${label}` : base;
 }
 
-// A month header written in another language is rewritten in the note
-// language; one already in it is kept exactly as the user wrote it.
+// A month header always carries its year ("## **GRUDZIEŃ 2027**"), since a
+// note can hold more than 12 months ahead. One already in the note language
+// with the year is kept exactly as written; others are rewritten, keeping bold.
 function monthHeader(sec, lang) {
-  const name = langOf(lang).months[sec.m - 1];
+  const name = `${langOf(lang).months[sec.m - 1]} ${sec.y}`;
   const text = sec.header.replace(/^##\s*/, '');
   if (normName(text) === name) return sec.header;
   return text.includes('**') ? `## **${name}**` : `## ${name}`;
@@ -819,15 +830,36 @@ function forgetMonthIfAbsent(model, y, m, state) {
   return true;
 }
 
-// Yearly routines for every month after the current one, up to December.
-function generateYearlyRest(model, src, today, state) {
+// Months "Fill in the year" works on: those after the current one up to
+// December, or, with nextYear (used in December), all of the next year.
+function yearMonths(today, nextYear) {
+  const out = [];
+  if (nextYear) for (let m = 1; m <= 12; m++) out.push({ y: today.y + 1, m });
+  else for (let m = today.m + 1; m <= 12; m++) out.push({ y: today.y, m });
+  return out;
+}
+
+// Yearly routines and holidays for those months (holidays also for this one).
+function generateYearlyRest(model, src, today, state, nextYear) {
   const present = routinePresence(model);
   let added = fillHolidays(model, src, today.y, today.m, today, state, present);
-  for (let m = today.m + 1; m <= 12; m++) {
-    added += fillHolidays(model, src, today.y, m, today, state, present);
-    added += fillYearly(model, src, today.y, m, today, state, present);
+  for (const { y, m } of yearMonths(today, nextYear)) {
+    added += fillHolidays(model, src, y, m, today, state, present);
+    added += fillYearly(model, src, y, m, today, state, present);
   }
   added += stripWorkOnDaysOff(model, src, today, state);
+  return added;
+}
+
+// "Fill in the year": every month after the current one, up to December, gets
+// its header and an undated block (a month with nothing in it gets just those).
+// Returns how many months were missing.
+function addYearSkeleton(model, today, nextYear) {
+  let added = 0;
+  for (const { y, m } of yearMonths(today, nextYear)) {
+    if (!getSection(model, y, m, false)) added++;
+    undatedExtra(model, y, m);
+  }
   return added;
 }
 
@@ -1154,16 +1186,18 @@ function placeLine(model, t, line) {
 // Month (y, m) that line `idx` of TODO DAILY belongs to: the nearest day
 // heading or month header above it, or null when there is none.
 function monthAtLine(lines, idx, today) {
+  let day = null;
   for (let i = Math.min(idx, lines.length - 1); i >= 0; i--) {
     const dh = /^###(?!#)\s*(\d{1,2})\.(\d{1,2})\.?(?:\s.*)?$/.exec(lines[i]);
-    if (dh && +dh[2] >= 1 && +dh[2] <= 12) return { y: resolveYear(+dh[2], +dh[1], today), m: +dh[2] };
+    if (!day && dh && +dh[2] >= 1 && +dh[2] <= 12) day = { m: +dh[2], d: +dh[1] };
     const mh = /^##(?!#)\s*(.*)$/.exec(lines[i]);
-    if (mh && monthFromName(mh[1])) {
-      const m = monthFromName(mh[1]);
-      return { y: resolveYear(m, 15, today), m };
+    const mi = mh && monthHeaderInfo(mh[1]);
+    if (mi) {
+      if (day && day.m !== mi.m) break;
+      return { y: mi.y || resolveYear(mi.m, day ? day.d : 15, today), m: mi.m };
     }
   }
-  return null;
+  return day ? { y: resolveYear(day.m, day.d, today), m: day.m } : null;
 }
 
 // Moves lines from..to (inclusive, headings and blank lines skipped) to the
@@ -1297,7 +1331,7 @@ function applySyncYearly(text, changes, today) {
 const UI = {
   pl: {
     cmdGenerateMonth: 'Rozpisz miesiąc',
-    cmdYearlyRest: 'Dodaj rutyny roczne do końca roku',
+    cmdYearlyRest: 'Rozpisz rok',
     cmdReview: 'Przegląd zaległych dni',
     cmdMoveNextMonth: 'Przenieś na następny miesiąc ({undated})',
     cmdWeekAlert: 'Pokaż święta w tym tygodniu',
@@ -1330,7 +1364,7 @@ const UI = {
     undoStartup: 'start Obsidiana',
     undoNewDay: 'nowy dzień',
     undoGenerateMonth: 'Rozpisz miesiąc ({month})',
-    undoYearlyRest: 'Dodaj rutyny roczne do końca roku',
+    undoYearlyRest: 'Rozpisz rok',
     undoReview: 'Przegląd zaległych dni',
 
     forgotDays: 'wtyczka zapomniała, które dni rozpisała.',
@@ -1346,6 +1380,11 @@ const UI = {
     monthAlreadyFilled: '{month} jest już rozpisany, nic nie dodano.',
     yearlyAdded: 'dodano zadania roczne do kolejnych miesięcy: {n}.',
     yearlyAlreadyFilled: 'rutyny roczne do końca roku są już rozpisane.',
+    yearMonthsAdded: 'dodano miesiące do końca roku: {months}, zadania roczne i święta: {n}.',
+    yearNextTitle: 'Rozpisać rok {year}?',
+    yearNextText: 'Jest grudzień, więc z tego roku nie zostało nic do rozpisania. Wtyczka dopisze cały rok {year}: dwanaście miesięcy z blokiem BEZ DATY, rutyny roczne i święta. Możesz to potem cofnąć komendą „Cofnij ostatnie rozpisanie”.',
+    yearNextOk: 'Rozpisz rok {year}',
+    yearHintMonth: 'Bieżący miesiąc ({month}) rozpiszesz komendą „Rozpisz miesiąc”.',
     noOverdue: 'brak zaległych dni.',
     selectTaskLine: 'zaznacz linię z zadaniem (nie nagłówek).',
     movedToNextMonth: 'przeniesiono {n} → {month} {year}, {undated}.',
@@ -1442,7 +1481,7 @@ const UI = {
   },
   en: {
     cmdGenerateMonth: 'Fill in a month',
-    cmdYearlyRest: 'Add yearly routines until the end of the year',
+    cmdYearlyRest: 'Fill in the year',
     cmdReview: 'Review past days',
     cmdMoveNextMonth: 'Move to next month ({undated})',
     cmdWeekAlert: 'Show holidays this week',
@@ -1475,7 +1514,7 @@ const UI = {
     undoStartup: 'Obsidian start-up',
     undoNewDay: 'new day',
     undoGenerateMonth: 'Fill in a month ({month})',
-    undoYearlyRest: 'Add yearly routines until the end of the year',
+    undoYearlyRest: 'Fill in the year',
     undoReview: 'Review past days',
 
     forgotDays: 'the plugin forgot which days it filled in.',
@@ -1491,6 +1530,11 @@ const UI = {
     monthAlreadyFilled: '{month} is already filled in, nothing added.',
     yearlyAdded: 'yearly tasks added to the coming months: {n}.',
     yearlyAlreadyFilled: 'yearly routines until the end of the year are already filled in.',
+    yearMonthsAdded: 'months added until the end of the year: {months}, yearly tasks and holidays: {n}.',
+    yearNextTitle: 'Fill in {year}?',
+    yearNextText: 'It is December, so nothing is left of this year. The plugin will add all of {year}: twelve months with an undated block, yearly routines and holidays. You can take it back with "Undo the last fill-in".',
+    yearNextOk: 'Fill in {year}',
+    yearHintMonth: 'To fill in the current month ({month}), use "Fill in a month".',
     noOverdue: 'no past days to review.',
     selectTaskLine: 'select a task line (not a heading).',
     movedToNextMonth: 'moved {n} → {month} {year}, {undated}.',
@@ -1707,7 +1751,7 @@ const core = {
   parseWeekly, parseMonthly, parseYearly, parseHolidays, parseSources,
   easterOf, adventOf, tradingSundays, computeCalendar, migrateFilledHolidays, stripWorkOnDaysOff, setLineChecked, uncheckAll,
   parseDaily, serializeDaily, parseRoutineLine, routinePresence,
-  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest, forgetMonthIfAbsent,
+  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest, addYearSkeleton, yearMonths, monthHeaderInfo, forgetMonthIfAbsent,
   collectReview, reviewNeeded, applyReview, moveLinesToNextMonth,
   weeklySnapshot, monthlySnapshot, weekStart, weekAhead, weekSignature, shouldShowWeekAlert, routinesChanged, applyWeeklyChange, applyMonthlyChange,
   checkboxStates, diffStates, applySyncMonthly, applySyncYearly,
@@ -1823,7 +1867,7 @@ if (obsidian) {
       this.addCommand({
         id: 'yearly-rest',
         name: t('cmdYearlyRest'),
-        callback: () => this.runYearlyRest(true),
+        callback: () => this.askYearlyRest(),
       });
       this.addCommand({
         id: 'review',
@@ -2263,20 +2307,43 @@ if (obsidian) {
       else if (verbose) this.say('monthAlreadyFilled', { month });
     }
 
-    async runYearlyRest(verbose) {
-      return this.withUndo(this.t('undoYearlyRest'), () => this.doYearlyRest(verbose));
+    // In December there is nothing left of this year, so the command offers
+    // the whole next year, after asking.
+    askYearlyRest() {
+      const today = todayNow();
+      if (today.m !== 12) return this.runYearlyRest(true);
+      new ConfirmModal(this.app, {
+        title: this.t('yearNextTitle', { year: today.y + 1 }),
+        text: this.t('yearNextText', { year: today.y + 1 }),
+        ok: this.t('yearNextOk', { year: today.y + 1 }),
+        cancel: this.t('cancel'),
+        onOk: () => this.runYearlyRest(true, true),
+      }).open();
     }
 
-    async doYearlyRest(verbose) {
+    async runYearlyRest(verbose, nextYear) {
+      return this.withUndo(this.t('undoYearlyRest'), () => this.doYearlyRest(verbose, nextYear));
+    }
+
+    async doYearlyRest(verbose, nextYear) {
       const src = await this.readSources();
       const res = await this.editDaily((model, today) => {
-        const added = generateYearlyRest(model, src, today, this.state);
-        return { added, changed: added > 0 };
+        const added = generateYearlyRest(model, src, today, this.state, nextYear);
+        // Only the command adds empty months, so the automatic run does not
+        // bring back months the user deleted.
+        const before = serializeDaily(model);
+        const months = verbose ? addYearSkeleton(model, today, nextYear) : 0;
+        const skeleton = serializeDaily(model) !== before;
+        const noThisMonth = !getSection(model, today.y, today.m, false);
+        return { added, months, noThisMonth, changed: added > 0 || skeleton };
       });
       await this.saveState();
       if (!res) return;
-      if (res.changed) this.say('yearlyAdded', { n: res.added });
+      if (res.changed && verbose) this.say('yearMonthsAdded', { months: res.months, n: res.added });
+      else if (res.changed) this.say('yearlyAdded', { n: res.added });
       else if (verbose) this.say('yearlyAlreadyFilled');
+      // The year leaves the current month alone: point to the command for it.
+      if (verbose && res.noThisMonth) this.say('yearHintMonth', { month: uiMonth(this.ui(), todayNow().m) });
     }
 
     // --- review -------------------------------------------------------------
@@ -2560,6 +2627,28 @@ if (obsidian) {
     onClose() {
       this.contentEl.empty();
       this.resolve(this.ok);
+    }
+  }
+
+  // Yes / no question; onOk runs after the window closes.
+  class ConfirmModal extends Modal {
+    constructor(app, opts) {
+      super(app);
+      this.opts = opts;
+    }
+    onOpen() {
+      const { contentEl } = this;
+      contentEl.createEl('h3', { text: this.opts.title });
+      contentEl.createEl('p', { text: this.opts.text });
+      const buttons = contentEl.createDiv({ cls: 'plain-planner-buttons' });
+      buttons.createEl('button', { text: this.opts.cancel }).addEventListener('click', () => this.close());
+      buttons.createEl('button', { text: this.opts.ok, cls: 'mod-cta' }).addEventListener('click', () => {
+        this.close();
+        this.opts.onOk();
+      });
+    }
+    onClose() {
+      this.contentEl.empty();
     }
   }
 

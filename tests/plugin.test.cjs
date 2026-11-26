@@ -217,3 +217,20 @@ test('setup: creates the note with the cheat sheet block; hotkey changes redraw 
   assert.deepEqual(drawn[0]['plain-planner:generate-month'], [{ modifiers: ['Mod'], key: 'M' }]);
   assert.equal(files['Plan.md'], before);
 });
+
+test('fill in the year: points to "Fill in a month" while the current month is missing', async () => {
+  const { plugin, files } = makePlugin({ 'TODO DAILY.md': '' }, { settings: { dailyPath: 'TODO DAILY.md', uiLanguage: 'en' } });
+  await plugin.loadState();
+  obsidianStub.notices.length = 0;
+  await plugin.doYearlyRest(true);
+  const hint = obsidianStub.notices.some((n) => n.includes('use "Fill in a month"'));
+  // In December nothing is added without the next-year question, so no file change either way is fine.
+  if (new Date().getMonth() !== 11) assert.ok(/BEZ DATY|NO DATE/.test(files['TODO DAILY.md']));
+  assert.ok(hint);
+  obsidianStub.notices.length = 0;
+  const m = new Date().getMonth() + 1;
+  const name = ['STYCZEŃ', 'LUTY', 'MARZEC', 'KWIECIEŃ', 'MAJ', 'CZERWIEC', 'LIPIEC', 'SIERPIEŃ', 'WRZESIEŃ', 'PAŹDZIERNIK', 'LISTOPAD', 'GRUDZIEŃ'][m - 1];
+  files['TODO DAILY.md'] = `## **${name} ${new Date().getFullYear()}**\n### BEZ DATY\n`;
+  await plugin.doYearlyRest(true);
+  assert.ok(!obsidianStub.notices.some((n) => n.includes('Fill in a month')));
+});

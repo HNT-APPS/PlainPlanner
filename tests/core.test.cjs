@@ -18,7 +18,7 @@ const T = { y: 2026, m: 11, d: 12 };
 test('round trip keeps content and fixes missing weekday', () => {
   const text = '### 12.11 CZWARTEK\nfoo\n\n### 13.11\nbar\n\n## **GRUDZIEŃ**\n### 03.12 \nbaz\n';
   const out = core.serializeDaily(core.parseDaily(text, T));
-  assert.equal(out, '### 12.11 CZWARTEK\nfoo\n\n### 13.11 PIĄTEK\nbar\n\n## **GRUDZIEŃ**\n### 03.12 CZWARTEK\nbaz\n');
+  assert.equal(out, '### 12.11 CZWARTEK\nfoo\n\n### 13.11 PIĄTEK\nbar\n\n## **GRUDZIEŃ 2026**\n### 03.12 CZWARTEK\nbaz\n');
 });
 
 test('CRLF input is handled', () => {
@@ -54,8 +54,56 @@ test('next month ignores this month checked state, new section gets header', () 
   const model = core.parseDaily('### 12.11 CZWARTEK\n', T);
   core.generateMonth(model, src(), 2026, 12, T, core.newState());
   const out = core.serializeDaily(model);
-  assert.match(out, /## \*\*GRUDZIEŃ\*\*\n### 01\.12 WTOREK\n- \[ \] Faktura %%rutyna:M:2026-12:01%%/);
+  assert.match(out, /## \*\*GRUDZIEŃ 2026\*\*\n### 01\.12 WTOREK\n- \[ \] Faktura %%rutyna:M:2026-12:01%%/);
   assert.match(out, /### 24\.12 CZWARTEK\n- \[ \] Wigilia/);
+});
+
+test('fill in the year: empty months get a header and BEZ DATY, filled ones keep their days', () => {
+  const model = core.parseDaily('## **GRUDZIEŃ**\n### 24.12 CZWARTEK\n- [ ] Wigilia\n', T);
+  assert.equal(core.addYearSkeleton(model, { y: 2026, m: 10, d: 15 }), 1);
+  const out = core.serializeDaily(model);
+  assert.match(out, /^## \*\*LISTOPAD 2026\*\*\n### BEZ DATY\n\n## \*\*GRUDZIEŃ 2026\*\*\n### 24\.12 CZWARTEK\n- \[ \] Wigilia\n\n### BEZ DATY\n$/);
+  assert.ok(!/PAŹDZIERNIK/.test(out), 'current month is left alone');
+  const again = core.parseDaily(out, T);
+  assert.equal(core.addYearSkeleton(again, { y: 2026, m: 10, d: 15 }), 0);
+  assert.equal(core.serializeDaily(again), out, 'second run changes nothing');
+  assert.equal(core.addYearSkeleton(core.parseDaily('', T), { y: 2026, m: 12, d: 1 }), 0);
+});
+
+test('month headers carry the year, so a whole year ahead reads back right', () => {
+  assert.deepEqual(core.monthHeaderInfo('**GRUDZIEŃ 2027**'), { m: 12, y: 2027 });
+  assert.deepEqual(core.monthHeaderInfo('December'), { m: 12, y: null });
+  assert.equal(core.monthHeaderInfo('Ideas 2027'), null);
+  const jan = { y: 2027, m: 1, d: 10 };
+  const model = core.parseDaily('', jan);
+  assert.equal(core.addYearSkeleton(model, jan), 11);
+  const back = core.parseDaily(core.serializeDaily(model), jan);
+  assert.deepEqual([...back.months.keys()], ['2027-02', '2027-03', '2027-04', '2027-05', '2027-06', '2027-07',
+    '2027-08', '2027-09', '2027-10', '2027-11', '2027-12']);
+  // Day headings take the year of their month header.
+  const d = core.parseDaily('## **GRUDZIEŃ 2027**\n### 24.12 PIĄTEK\nx\n', jan);
+  assert.ok(d.months.get('2027-12').days.has(24));
+  // An older header without the year gets it on the next save.
+  assert.equal(core.serializeDaily(core.parseDaily('## **GRUDZIEŃ**\n### 24.12\nx\n', T)),
+    '## **GRUDZIEŃ 2026**\n### 24.12 CZWARTEK\nx\n');
+  // Moving lines finds the year in the month header too.
+  const mv = core.moveLinesToNextMonth('## **LISTOPAD 2027**\n### 05.11 PIĄTEK\nzadanie\n', 2, 2, jan);
+  assert.deepEqual(mv.target, { y: 2027, m: 12 });
+});
+
+test('fill in the year in December: all of next year', () => {
+  const dec = { y: 2026, m: 12, d: 5 };
+  assert.deepEqual(core.yearMonths(dec, false), []);
+  assert.equal(core.yearMonths(dec, true).length, 12);
+  const model = core.parseDaily('', dec);
+  const st = core.newState();
+  core.generateYearlyRest(model, Object.assign(src(), { tradingSundays: false }), dec, st, true);
+  core.addYearSkeleton(model, dec, true);
+  assert.equal(core.addYearSkeleton(model, dec, true), 0, 'second run adds nothing');
+  const out = core.serializeDaily(model);
+  assert.match(out, /## \*\*STYCZEŃ 2027\*\*/);
+  assert.match(out, /## \*\*GRUDZIEŃ 2027\*\*/);
+  assert.equal((out.match(/### BEZ DATY/g) || []).length, 12);
 });
 
 test('yearly rest fills only later months, once', () => {
@@ -154,7 +202,7 @@ test('review: nextMonth action moves to BEZ DATY of the month after today', () =
   const model = core.parseDaily('### 10.11 WTOREK\nmoje\n### 12.11 CZWARTEK\n', T);
   const review = core.collectReview(model, src(), T, core.newState());
   core.applyReview(model, review, new Map([[review.blocks[0].items[0].id, { action: 'nextMonth' }]]), T);
-  assert.equal(core.serializeDaily(model), '### 12.11 CZWARTEK\n\n## **GRUDZIEŃ**\n### BEZ DATY\nmoje\n');
+  assert.equal(core.serializeDaily(model), '### 12.11 CZWARTEK\n\n## **GRUDZIEŃ 2026**\n### BEZ DATY\nmoje\n');
 });
 
 test('review: nextMonth in December goes to January next year', () => {
@@ -162,7 +210,7 @@ test('review: nextMonth in December goes to January next year', () => {
   const model = core.parseDaily('## **GRUDZIEŃ**\n### 10.12 CZWARTEK\nmoje\n', D);
   const review = core.collectReview(model, src(), D, core.newState());
   core.applyReview(model, review, new Map([[review.blocks[0].items[0].id, { action: 'nextMonth' }]]), D);
-  assert.equal(core.serializeDaily(model), '## **GRUDZIEŃ**\n\n## **STYCZEŃ**\n### BEZ DATY\nmoje\n');
+  assert.equal(core.serializeDaily(model), '## **GRUDZIEŃ 2026**\n\n## **STYCZEŃ 2027**\n### BEZ DATY\nmoje\n');
 });
 
 test('editor move: selected lines jump to next month after their own month, headings skipped', () => {
@@ -171,11 +219,11 @@ test('editor move: selected lines jump to next month after their own month, head
   const r1 = core.moveLinesToNextMonth(text, 0, 2, T);
   assert.equal(r1.count, 2);
   assert.deepEqual(r1.target, { y: 2026, m: 12 });
-  assert.equal(r1.text, '### 13.11 PIĄTEK\n\n## **GRUDZIEŃ**\n### 05.12 SOBOTA\ngrudniowe\n\n### BEZ DATY\nstare\njeden\ndwa\n');
+  assert.equal(r1.text, '### 13.11 PIĄTEK\n\n## **GRUDZIEŃ 2026**\n### 05.12 SOBOTA\ngrudniowe\n\n### BEZ DATY\nstare\njeden\ndwa\n');
   // a December line goes to January
   const r2 = core.moveLinesToNextMonth(text, 6, 6, T);
   assert.deepEqual(r2.target, { y: 2027, m: 1 });
-  assert.match(r2.text, /## \*\*STYCZEŃ\*\*\n### BEZ DATY\ngrudniowe\n$/);
+  assert.match(r2.text, /## \*\*STYCZEŃ 2027\*\*\n### BEZ DATY\ngrudniowe\n$/);
   // only a heading / blank selected -> nothing
   assert.equal(core.moveLinesToNextMonth(text, 3, 4, T), null);
 });
@@ -590,7 +638,7 @@ test('generate in English: headings, NO DATE, routine marker, DAY OFF skips #wor
   const model = core.parseDaily('', T, 'en');
   core.generateMonth(model, srcEn(), 2026, 11, T, core.newState());
   const out = core.serializeDaily(model);
-  assert.match(out, /^## \*\*NOVEMBER\*\*\n### 12\.11 THURSDAY\nemails #work\n/m);
+  assert.match(out, /^## \*\*NOVEMBER 2026\*\*\n### 12\.11 THURSDAY\nemails #work\n/m);
   assert.match(out, /### 14\.11 SATURDAY\n- \[ \] Backup %%routine:M:2026-11:14%%\nshopping/);
   assert.match(out, /### 19\.11 THURSDAY - DAY OFF\nFounders Day #dayoff %%routine:S:2026:11-19%%\n\n### 20/);
   assert.match(out, /### 20\.11 FRIDAY\n- \[ \] Car service %%routine:R:2026:11%%/);
@@ -601,10 +649,10 @@ test('generate in English: headings, NO DATE, routine marker, DAY OFF skips #wor
 test('switching a Polish note to English translates headings and known labels only', () => {
   const pl = '### 12.11 CZWARTEK\nfoo\n- [ ] Lekarz %%rutyna:R:2026:11%%\n### 13.11 PIĄTEK - WOLNE - HANDLOWA\n### 14.11 SOBOTA - wyjazd\n### BEZ DATY\nbar\n\n## **GRUDZIEŃ**\n### 05.12 SOBOTA\n';
   const out = core.serializeDaily(core.parseDaily(pl, T, 'en'));
-  assert.equal(out, '### 12.11 THURSDAY\nfoo\n- [ ] Lekarz %%rutyna:R:2026:11%%\n\n### 13.11 FRIDAY - DAY OFF - SHOPPING SUNDAY\n### 14.11 SATURDAY - wyjazd\n### NO DATE\nbar\n\n## **DECEMBER**\n### 05.12 SATURDAY\n');
+  assert.equal(out, '### 12.11 THURSDAY\nfoo\n- [ ] Lekarz %%rutyna:R:2026:11%%\n\n### 13.11 FRIDAY - DAY OFF - SHOPPING SUNDAY\n### 14.11 SATURDAY - wyjazd\n### NO DATE\nbar\n\n## **DECEMBER 2026**\n### 05.12 SATURDAY\n');
   // ...and back: the round trip ends where it started (old markers kept).
   const back = core.serializeDaily(core.parseDaily(out, T, 'pl'));
-  assert.match(back, /### 13\.11 PIĄTEK - WOLNE - HANDLOWA\n### 14\.11 SOBOTA - wyjazd\n### BEZ DATY\nbar\n\n## \*\*GRUDZIEŃ\*\*/);
+  assert.match(back, /### 13\.11 PIĄTEK - WOLNE - HANDLOWA\n### 14\.11 SOBOTA - wyjazd\n### BEZ DATY\nbar\n\n## \*\*GRUDZIEŃ 2026\*\*/);
 });
 
 test('old "rutyna" markers still count as present when writing in English', () => {
@@ -619,7 +667,7 @@ test('old "rutyna" markers still count as present when writing in English', () =
 test('moving to next month reuses an existing BEZ DATY block in an English note', () => {
   const text = '### 12.11 THURSDAY\nidea\n\n## DECEMBER\n### BEZ DATY\nold\n';
   const res = core.moveLinesToNextMonth(text, 1, 1, T, 'en');
-  assert.equal(res.text, '### 12.11 THURSDAY\n\n## DECEMBER\n### NO DATE\nold\nidea\n');
+  assert.equal(res.text, '### 12.11 THURSDAY\n\n## DECEMBER 2026\n### NO DATE\nold\nidea\n');
 });
 
 test('labelText maps canonical and translated labels, keeps custom ones', () => {
@@ -654,7 +702,7 @@ test('ui: texts, language choice and dates', () => {
 });
 
 test('daily note: text above the plan and under an own # / ## heading below it is kept', () => {
-  const text = 'My notes\n- [ ] not a plan task\n\n## **LISTOPAD**\n### 12.11 CZWARTEK\nfoo\n\n## Ideas\n### 13.11 kept as is\n- idea\n\n# Archive\nold\n';
+  const text = 'My notes\n- [ ] not a plan task\n\n## **LISTOPAD 2026**\n### 12.11 CZWARTEK\nfoo\n\n## Ideas\n### 13.11 kept as is\n- idea\n\n# Archive\nold\n';
   const model = core.parseDaily(text, T);
   assert.deepEqual(model.tail, ['## Ideas', '### 13.11 kept as is', '- idea', '', '# Archive', 'old', '']);
   assert.equal(model.months.get('2026-11').days.size, 1);
@@ -682,7 +730,7 @@ test('cheat sheet: rows with current hotkeys, a block above the plan', () => {
   assert.deepEqual(rows.map((r) => r.label), [
     'Paleta komend', 'Rozpisz miesiąc', 'Cofnij ostatnie rozpisanie', 'Przegląd zaległych dni',
     'Zapomnij rozpisane dni (rozpisz od nowa)', 'Przenieś na następny miesiąc (BEZ DATY)',
-    'Pokaż święta w tym tygodniu', 'Dodaj rutyny roczne do końca roku', 'Uruchom teraz (jak przy starcie Obsidiana)',
+    'Pokaż święta w tym tygodniu', 'Rozpisz rok', 'Uruchom teraz (jak przy starcie Obsidiana)',
   ]);
   const en = core.cheatEntries('en', 'pl', { 'command-palette:open': [] }, true);
   assert.deepEqual(en[0].combos, []);
