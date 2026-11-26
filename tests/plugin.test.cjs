@@ -14,11 +14,12 @@ class Plugin { constructor(app, manifest) { this.app = app; this.manifest = mani
 class PluginSettingTab { constructor(app, plugin) { this.app = app; this.plugin = plugin; } }
 class Modal {}
 class SuggestModal {}
+class FuzzySuggestModal {}
 class Setting {}
 class Notice { constructor(msg) { notices.push(msg); } }
 class TFile { constructor(path) { this.path = path; this.basename = path.replace(/\\.md$/, ''); this.extension = 'md'; } }
 const normalizePath = (p) => p;
-const stub = { Plugin, PluginSettingTab, Modal, SuggestModal, Setting, Notice, TFile, normalizePath, notices };
+const stub = { Plugin, PluginSettingTab, Modal, SuggestModal, FuzzySuggestModal, Setting, Notice, TFile, normalizePath, notices };
 stub.appLanguage = 'en';
 stub.getLanguage = () => stub.appLanguage;
 module.exports = stub;
@@ -35,10 +36,11 @@ const lines = (t) => t.split('\n').filter(Boolean);
 
 // In-memory vault; `interfere(text)` may return another text to simulate an
 // edit that lands between the plugin's read and its write.
-function makePlugin(files, saved = {}) {
+function makePlugin(files, saved = { settings: { dailyPath: 'TODO DAILY.md' } }) {
   const tfiles = new Map(Object.keys(files).map((p) => [p, new TFile(p)]));
   const vault = {
     interfere: null,
+    on: () => {},
     getAbstractFileByPath: (p) => tfiles.get(p) || null,
     read: async (f) => files[f.path],
     process: async (f, fn) => {
@@ -50,7 +52,12 @@ function makePlugin(files, saved = {}) {
       files[f.path] = fn(files[f.path]);
       return files[f.path];
     },
-    adapter: { exists: async () => true, mkdir: async () => {}, write: async () => {}, list: async () => ({ files: [] }), remove: async () => {} },
+    configDir: '.obsidian',
+    create: async (p, text) => { files[p] = text; tfiles.set(p, new TFile(p)); },
+    adapter: {
+      exists: async () => true, mkdir: async () => {}, write: async () => {}, list: async () => ({ files: [] }), remove: async () => {},
+      read: async (p) => { if (!(p in files)) throw new Error('missing'); return files[p]; },
+    },
   };
   const plugin = new PlainPlannerPlugin({ vault }, { dir: '.obsidian/plugins/plain-planner' });
   plugin.loadData = async () => saved;
@@ -109,7 +116,7 @@ test('note language: Polish for settings from the old version, else follows the 
   const old = makePlugin({}, { settings: { spreadDays: 5 } }).plugin;
   await old.loadState();
   assert.equal(old.settings.noteLanguage, 'pl');
-  const fresh = makePlugin({}).plugin;
+  const fresh = makePlugin({}, {}).plugin;
   await fresh.loadState();
   assert.equal(fresh.settings.noteLanguage, 'en'); // app in English
   const chosen = makePlugin({}, { settings: { noteLanguage: 'en' } }).plugin;
@@ -155,4 +162,51 @@ test('interface language: notices and settings use it', async () => {
   assert.equal(tab.getSettingDefinitions()[0].heading, 'Pliki');
   await tab.setControlValue('uiLanguage', 'xx');
   assert.equal(plugin.settings.uiLanguage, 'pl');
+});
+
+test('setup: asked for when no daily note is set or it is gone, routine files are optional', async () => {
+  const fresh = makePlugin({}, {}).plugin;
+  await fresh.loadState();
+  assert.equal(fresh.settings.dailyPath, '');
+  assert.equal(fresh.settings.autoGenerate, false);
+  assert.equal(fresh.dailyFile(), null);
+  let asked = 0;
+  fresh.openSetup = () => { asked++; };
+  assert.equal(await fresh.editDaily(() => ({ changed: true })), null);
+  assert.equal(asked, 1);
+
+  obsidianStub.notices.length = 0;
+  const { plugin } = makePlugin({ 'TODO DAILY.md': '' }, { settings: { dailyPath: 'TODO DAILY.md', weeklyPath: 'gone.md' } });
+  await plugin.loadState();
+  await plugin.readSources();
+  await plugin.readSources();
+  assert.deepEqual(obsidianStub.notices, ['Plain Planner: file gone.md not found']); // once, unset files silent
+});
+
+test('setup: renaming a file inside Obsidian updates its setting', async () => {
+  const { plugin } = makePlugin({ 'TODO DAILY.md': '' });
+  await plugin.loadState();
+  await plugin.onRename(new TFile('Plan/My plan.md'), 'TODO DAILY.md');
+  assert.equal(plugin.settings.dailyPath, 'Plan/My plan.md');
+  assert.equal(plugin.savedData.settings.dailyPath, 'Plan/My plan.md');
+});
+
+test('setup: creates the note with the cheat sheet; hotkey changes update it', async () => {
+  const { plugin, files } = makePlugin({}, {});
+  await plugin.loadState();
+  plugin.app.workspace = { openLinkText: () => {} };
+  plugin.registerCommands = () => {};
+  let done;
+  const origOpen = obsidianStub.Modal.prototype.open;
+  obsidianStub.Modal.prototype.open = function () { done = this.done; };
+  plugin.openSetup(false);
+  obsidianStub.Modal.prototype.open = origOpen;
+  await done('Plan.md', 'pl');
+  assert.equal(plugin.settings.dailyPath, 'Plan.md');
+  assert.equal(plugin.settings.noteLanguage, 'pl');
+  assert.equal(plugin.settings.uiLanguage, 'pl');
+  assert.ok(files['Plan.md'].includes('- Rozpisz miesiąc: brak skrótu'));
+  files['.obsidian/hotkeys.json'] = JSON.stringify({ 'plain-planner:generate-month': [{ modifiers: ['Mod'], key: 'M' }] });
+  await plugin.refreshCheatSheet();
+  assert.ok(files['Plan.md'].includes('- Rozpisz miesiąc: Ctrl + M'));
 });

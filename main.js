@@ -461,12 +461,24 @@ function undatedExtra(model, y, m) {
   return sec.extras.find((x) => UNDATED_NAMES.has(x.name)) || ensureExtra(sec, langOf(model.lang).undated);
 }
 
+// The note is: the user's text (preamble), the plan (month sections) and,
+// from the first "#" / "##" heading under the plan that is not a month name,
+// the user's text again (tail). Preamble and tail are never changed.
 function parseDaily(text, today, lang) {
-  const model = { preamble: [], months: new Map(), lang: lang || DEFAULT_LANG };
+  const model = { preamble: [], months: new Map(), tail: [], lang: lang || DEFAULT_LANG };
   let target = model.preamble;
   let curSec = null;
   for (const line of splitLines(text)) {
+    if (target === model.tail) {
+      target.push(line);
+      continue;
+    }
     const mh = /^##(?!#)\s*(.*)$/.exec(line);
+    if (curSec && /^#{1,2}\s+\S/.test(line) && !(mh && monthFromName(mh[1]))) {
+      target = model.tail;
+      target.push(line);
+      continue;
+    }
     if (mh && monthFromName(mh[1])) {
       const m = monthFromName(mh[1]);
       const sec = getSection(model, resolveYear(m, 15, today), m, true);
@@ -556,6 +568,11 @@ function serializeDaily(model) {
       out.push(UNDATED_NAMES.has(e.name) && e.name !== undated ? `### ${undated}` : e.heading);
       block(e.lines);
     }
+  }
+  if (model.tail.length) {
+    while (out.length && !out[out.length - 1].trim()) out.pop();
+    if (out.length) out.push('');
+    out.push(...model.tail);
   }
   while (out.length && !out[out.length - 1].trim()) out.pop();
   return out.join('\n') + '\n';
@@ -784,6 +801,22 @@ function generateMonth(model, src, y, m, today, state) {
   }
   result.added += stripWorkOnDaysOff(model, src, today, state);
   return result;
+}
+
+// The month is not in the note at all (no heading, no days), e.g. its fill-in
+// was undone with Ctrl+Z: forget that it was filled in so it can be filled
+// in again. Only for an explicit "fill in a month"; automatic runs keep the
+// memory, so a month deleted on purpose does not come back by itself.
+function forgetMonthIfAbsent(model, y, m, state) {
+  if (model.months.has(monthKey(y, m))) return false;
+  const ym = monthKey(y, m);
+  const keep = (set, belongs) => new Set([...set].filter((v) => !belongs(v)));
+  state.filledDays = keep(state.filledDays, (v) => v.startsWith(`${ym}-`));
+  state.filledYearly = keep(state.filledYearly, (v) => v === ym);
+  state.labeledDays = keep(state.labeledDays, (v) => v.startsWith(`${ym}-`));
+  state.strippedDays = keep(state.strippedDays, (v) => v.startsWith(`${ym}-`));
+  state.placedHolidays = keep(state.placedHolidays, (v) => v.startsWith(`S|${y}|${pad2(m)}-`));
+  return true;
 }
 
 // Yearly routines for every month after the current one, up to December.
@@ -1271,6 +1304,25 @@ const UI = {
     cmdRunNow: 'Uruchom teraz (jak przy starcie Obsidiana)',
     cmdUndoLast: 'Cofnij ostatnie rozpisanie',
     cmdForget: 'Zapomnij rozpisane dni (rozpisz od nowa)',
+    cmdSetup: 'Utwórz plik planu dnia i wybierz język',
+
+    setupTitle: 'Plain Planner – pierwsze kroki',
+    setupLanguage: 'Język',
+    setupLanguageDesc: 'Język okien i komunikatów oraz nazw miesięcy i dni tygodnia w planie.',
+    setupIntro: 'Wtyczka utworzy nową notatkę, w której będzie rozpisywać plan dnia na kolejne miesiące. Na górze znajdziesz zwiniętą ściągę komend, którą możesz usunąć. Możesz też dopisywać własny tekst: nad planem albo pod nim, pod własnym nagłówkiem # lub ##.',
+    setupMissing: 'Nie ma już pliku {path} (usunięty albo przeniesiony poza Obsidianem). Utwórz nowy.',
+    setupName: 'Nazwa notatki',
+    setupCreateBtn: 'Utwórz',
+    setupExists: 'Notatka {file} już istnieje. Podaj inną nazwę.',
+    setupBadName: 'Nazwa nie może być pusta ani zawierać znaków \\ / : * ? " < > | # ^ [ ].',
+    setupDone: 'plan dnia będzie w {file}. Użyj komendy „{cmd}”, aby rozpisać miesiąc.',
+
+    cheatTitle: 'ściąga komend',
+    cheatNote: 'Możesz ją usunąć. Dopóki tu jest, wtyczka aktualizuje w niej skróty klawiszowe.',
+    cheatPaletteName: 'Paleta komend',
+    cheatPalette: '{keys}, potem wpisz „Plain Planner”',
+    cheatNone: 'brak skrótu',
+    cheatHint: 'Skróty ustawisz w: Ustawienia → Skróty klawiszowe, wyszukaj „Plain Planner”.',
 
     undoRunNow: 'Uruchom teraz',
     undoStartup: 'start Obsidiana',
@@ -1364,7 +1416,7 @@ const UI = {
     headFiles: 'Pliki',
     headBehaviour: 'Działanie',
     setUiLanguage: 'Język interfejsu',
-    setUiLanguageDesc: 'Język komend, okien i komunikatów. Ustawienia zmienią się po ponownym otwarciu tej karty, a nazwy komend po ponownym uruchomieniu Obsidiana.',
+    setUiLanguageDesc: 'Język komend, okien i komunikatów. Teksty tej karty zmienią się po jej ponownym otwarciu.',
     optAuto: 'Automatycznie (jak Obsidian)',
     setNoteLanguage: 'Język notatek',
     setNoteLanguageDesc: 'Język nagłówków, które wtyczka dopisuje (dni tygodnia, miesiące, {undated}, {dayOff}). Pliki rutyn i świąt mogą być w obu językach.',
@@ -1395,6 +1447,25 @@ const UI = {
     cmdRunNow: 'Run now (as on Obsidian start-up)',
     cmdUndoLast: 'Undo the last fill-in',
     cmdForget: 'Forget filled-in days (fill in again)',
+    cmdSetup: 'Create the daily plan file and choose the language',
+
+    setupTitle: 'Plain Planner – getting started',
+    setupLanguage: 'Language',
+    setupLanguageDesc: 'Language of the interface and of month and weekday names in your plan.',
+    setupIntro: 'The plugin creates a new note where it writes the day-by-day plan for each month. At the top you will find a collapsed command cheat sheet, which you may delete. You can add your own text too: above the plan, or below it under your own # or ## heading.',
+    setupMissing: 'The file {path} no longer exists (deleted, or moved outside Obsidian). Please create a new one.',
+    setupName: 'Note name',
+    setupCreateBtn: 'Create',
+    setupExists: 'The note {file} already exists. Please choose another name.',
+    setupBadName: 'The name must not be empty or contain \\ / : * ? " < > | # ^ [ ].',
+    setupDone: 'the daily plan goes to {file}. Use the "{cmd}" command to fill in a month.',
+
+    cheatTitle: 'command cheat sheet',
+    cheatNote: 'You may delete it. While it is here, the plugin keeps its hotkeys up to date.',
+    cheatPaletteName: 'Command palette',
+    cheatPalette: '{keys}, then type "Plain Planner"',
+    cheatNone: 'no hotkey',
+    cheatHint: 'Set hotkeys in: Settings → Hotkeys, search for "Plain Planner".',
 
     undoRunNow: 'Run now',
     undoStartup: 'Obsidian start-up',
@@ -1488,7 +1559,7 @@ const UI = {
     headFiles: 'Files',
     headBehaviour: 'Behaviour',
     setUiLanguage: 'Interface language',
-    setUiLanguageDesc: 'Language of commands, dialogs and notices. Settings change when you reopen this tab, command names after restarting Obsidian.',
+    setUiLanguageDesc: 'Language of commands, dialogs and notices. The texts of this tab change when you reopen it.',
     optAuto: 'Automatic (same as Obsidian)',
     setNoteLanguage: 'Note language',
     setNoteLanguageDesc: 'Language of the headings the plugin writes (weekdays, months, {undated}, {dayOff}). Routine and holiday files may use either language.',
@@ -1545,6 +1616,124 @@ function uiDayHead(lang, t, when) {
   return when ? `${head} (${uiText(lang, when === 'today' ? 'whenToday' : 'whenTomorrow')})` : head;
 }
 
+// --- command cheat sheet ----------------------------------------------------------
+
+// A collapsed callout ("> [!plain-planner]- ...") at the top of a new daily
+// note listing the commands and their hotkeys; styles.css makes it small.
+// The user may delete it or any of its lines; while it is there, the lines
+// that are left are rewritten when hotkeys or the language change. Lines are
+// recognised by their label in any language.
+const CHEAT_COMMANDS = [
+  ['generate-month', 'cmdGenerateMonth'],
+  ['yearly-rest', 'cmdYearlyRest'],
+  ['review', 'cmdReview'],
+  ['move-next-month', 'cmdMoveNextMonth'],
+  ['week-alert', 'cmdWeekAlert'],
+  ['run-now', 'cmdRunNow'],
+  ['undo-last', 'cmdUndoLast'],
+  ['forget-filled', 'cmdForget'],
+];
+const PLUGIN_ID = 'plain-planner';
+const PALETTE_ID = 'command-palette:open';
+const PALETTE_DEFAULT = [{ modifiers: ['Mod'], key: 'P' }];
+const CHEAT_TYPE = 'plain-planner';
+const CHEAT_RE = /^>\s*\[!plain-planner\]([-+]?)/i;
+
+// { modifiers: ['Mod', 'Shift'], key: 'M' } -> "Ctrl + Shift + M" (Cmd on macOS).
+function formatHotkey(hk, isMac) {
+  const names = { Mod: isMac ? 'Cmd' : 'Ctrl', Ctrl: 'Ctrl', Meta: isMac ? 'Cmd' : 'Win', Alt: isMac ? 'Option' : 'Alt', Shift: 'Shift' };
+  const order = ['Mod', 'Ctrl', 'Meta', 'Alt', 'Shift'];
+  const mods = (hk.modifiers || []).slice().sort((a, b) => order.indexOf(a) - order.indexOf(b)).map((m) => names[m] || m);
+  const key = hk.key && hk.key.length === 1 ? hk.key.toUpperCase() : hk.key;
+  return [...mods, key].filter(Boolean).join(' + ');
+}
+
+// Hotkeys of a command from .obsidian/hotkeys.json (an entry there replaces
+// the default; the plugin sets no defaults of its own).
+function hotkeysOf(hotkeys, id) {
+  if (hotkeys && Object.prototype.hasOwnProperty.call(hotkeys, id)) return hotkeys[id] || [];
+  return id === PALETTE_ID ? PALETTE_DEFAULT : [];
+}
+
+// Every line of the sheet as a { label, value } pair in `lang`, plus, for
+// each line, all labels it may carry in any language.
+function cheatEntries(lang, noteLang, hotkeys, isMac) {
+  const keysText = (id) => {
+    const list = hotkeysOf(hotkeys, id);
+    return list.length ? list.map((h) => formatHotkey(h, isMac)).join(' / ') : uiText(lang, 'cheatNone');
+  };
+  const variants = (key) => {
+    const out = new Set();
+    for (const l of Object.keys(UI)) for (const n of Object.values(LANGS)) out.add(uiText(l, key, { undated: n.undated }));
+    return out;
+  };
+  const undated = langOf(noteLang).undated;
+  const entries = [{
+    labels: variants('cheatPaletteName'),
+    label: uiText(lang, 'cheatPaletteName'),
+    value: uiText(lang, 'cheatPalette', { keys: keysText(PALETTE_ID) }),
+  }];
+  for (const [id, key] of CHEAT_COMMANDS) {
+    entries.push({ labels: variants(key), label: uiText(lang, key, { undated }), value: keysText(`${PLUGIN_ID}:${id}`) });
+  }
+  return entries;
+}
+
+const cheatHeader = (lang, fold) => `> [!${CHEAT_TYPE}]${fold} Plain Planner – ${uiText(lang, 'cheatTitle')}`;
+
+function buildCheatSheet(lang, noteLang, hotkeys, isMac) {
+  const lines = [cheatHeader(lang, '-'), `> ${uiText(lang, 'cheatNote')}`];
+  for (const e of cheatEntries(lang, noteLang, hotkeys, isMac)) lines.push(`> - ${e.label}: ${e.value}`);
+  lines.push(`> ${uiText(lang, 'cheatHint')}`, '', '---', '');
+  return lines.join('\n');
+}
+
+// Rewrites the sheet in `text` (the first plain-planner callout above the
+// plan). Returns `text` unchanged when there is no sheet or nothing changes.
+function updateCheatSheet(text, lang, noteLang, hotkeys, isMac) {
+  const lines = splitLines(text);
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^#{2,3}(?!#)/.test(lines[i])) break; // the plan starts: no sheet
+    if (CHEAT_RE.test(lines[i])) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return text;
+  const entries = cheatEntries(lang, noteLang, hotkeys, isMac);
+  const fixed = (key) => new Set(Object.keys(UI).map((l) => uiText(l, key)));
+  const notes = fixed('cheatNote');
+  const hints = fixed('cheatHint');
+  let changed = false;
+  for (let i = start; i < lines.length && lines[i].startsWith('>'); i++) {
+    const body = lines[i].replace(/^>\s?/, '');
+    let next = lines[i];
+    if (i === start) next = cheatHeader(lang, CHEAT_RE.exec(lines[i])[1]);
+    else if (notes.has(body.trim())) next = `> ${uiText(lang, 'cheatNote')}`;
+    else if (hints.has(body.trim())) next = `> ${uiText(lang, 'cheatHint')}`;
+    else {
+      const m = /^- (.+?): /.exec(body);
+      const e = m && entries.find((x) => x.labels.has(m[1]));
+      if (e) next = `> - ${e.label}: ${e.value}`;
+    }
+    if (next !== lines[i]) {
+      lines[i] = next;
+      changed = true;
+    }
+  }
+  return changed ? lines.join('\n') : text;
+}
+
+// A name for a new note typed by the user -> "Name.md", or null when it can
+// not be a file name (empty, a folder separator or a character Obsidian
+// does not allow in links).
+function noteFileName(name) {
+  const n = String(name || '').trim().replace(/\.md$/i, '').trim();
+  if (!n || /[\\/:*?"<>|#^[\]]/.test(n) || n.startsWith('.')) return null;
+  return `${n}.md`;
+}
+
 // Settings input -> stored value (null when not acceptable).
 function cleanSetting(item, value) {
   if (item.type === 'toggle') return !!value;
@@ -1559,11 +1748,12 @@ function cleanSetting(item, value) {
 const core = {
   LANGS, ACTIONS, labelText,
   UI, UI_LANG_SETTINGS, resolveUiLang, uiText, uiMonth, uiWeekday, uiDayHead,
+  CHEAT_COMMANDS, formatHotkey, buildCheatSheet, updateCheatSheet, noteFileName,
   pad2, monthKey, addDays, toIso, parseIso, resolveYear,
   parseWeekly, parseMonthly, parseYearly, parseHolidays, parseSources,
   easterOf, adventOf, tradingSundays, computeCalendar, migrateFilledHolidays, stripWorkOnDaysOff, setLineChecked, uncheckAll,
   parseDaily, serializeDaily, parseRoutineLine, routinePresence,
-  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest,
+  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest, forgetMonthIfAbsent,
   collectReview, reviewNeeded, applyReview, moveLinesToNextMonth,
   weeklySnapshot, monthlySnapshot, weekStart, weekAhead, weekSignature, shouldShowWeekAlert, routinesChanged, applyWeeklyChange, applyMonthlyChange,
   checkboxStates, diffStates, applySyncMonthly, applySyncYearly,
@@ -1576,27 +1766,33 @@ const core = {
 
 if (obsidian) {
   const { Plugin, PluginSettingTab, Setting, Modal, SuggestModal, Notice, TFile, normalizePath } = obsidian;
+  const isMac = () => !!(obsidian.Platform && obsidian.Platform.isMacOS);
 
   // Note language for a fresh install: Polish when Obsidian runs in Polish
   // (getLanguage exists since 1.8.7), English otherwise.
   const appLanguage = () => (typeof obsidian.getLanguage === 'function' ? obsidian.getLanguage() : 'en');
 
+  // A fresh install has no files set: the setup dialog asks for the daily
+  // plan note, routine files are optional. Months are filled in on request
+  // until the user turns on automatic filling.
   const DEFAULT_SETTINGS = {
     uiLanguage: 'auto',
     noteLanguage: 'en',
-    dailyPath: 'TODO DAILY.md',
-    weeklyPath: 'RUTYNY/RUTYNA TYGODNIOWA.md',
-    monthlyPath: 'RUTYNY/RUTYNA MIESIĘCZNA.md',
-    yearlyPath: 'RUTYNY/RUTYNA ROCZNA.md',
-    holidaysPath: 'RUTYNY/ŚWIĘTA.md',
+    dailyPath: '',
+    weeklyPath: '',
+    monthlyPath: '',
+    yearlyPath: '',
+    holidaysPath: '',
     tradingSundays: true,
     workTag: '#praca',
-    autoGenerate: true,
+    autoGenerate: false,
     autoReview: true,
     weekAlert: true,
     spreadDays: 7,
   };
   const MAX_BACKUPS = 20;
+  const DEFAULT_DAILY = 'TODO DAILY';
+  const PATH_KEYS = ['dailyPath', 'weeklyPath', 'monthlyPath', 'yearlyPath', 'holidaysPath'];
 
   const todayNow = () => fromDate(new Date());
   const notify = (msg) => new Notice(`Plain Planner: ${msg}`);
@@ -1624,14 +1820,47 @@ if (obsidian) {
 
     async onload() {
       await this.loadState();
-      const t = (key) => this.t(key, this.noteWords());
       this.cache = new Map();
       this.lastRunDay = null;
       this.busy = false;
       this.undoOpen = null;
 
       this.addSettingTab(new PlainPlannerSettingTab(this.app, this));
+      this.registerCommands();
+      // Same action in the right-click / long-press menu of the editor.
+      this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, view) => {
+        if (!this.isDailyView(view)) return;
+        menu.addItem((item) => item
+          .setTitle(this.t('cmdMoveNextMonth', this.noteWords()))
+          .setIcon('calendar-plus')
+          .onClick(() => this.moveSelectionToNextMonth(editor)));
+      }));
+      // Files renamed or moved inside Obsidian: follow them.
+      this.registerEvent(this.app.vault.on('rename', (f, oldPath) => this.onRename(f, oldPath)));
 
+      this.app.workspace.onLayoutReady(async () => {
+        await this.refreshCache();
+        this.registerEvent(this.app.vault.on('modify', (f) => this.onModify(f)));
+        if (!this.dailyFile()) this.openSetup(true);
+        else {
+          await this.refreshCheatSheet();
+          await this.withUndo(this.t('undoStartup'), () => this.dailyRun(true));
+        }
+      });
+      // Obsidian has no event for hotkey changes; it saves them to
+      // hotkeys.json, so watch that file's modification time.
+      this.registerInterval(window.setInterval(() => this.checkHotkeys(), 3000));
+      // Obsidian left open overnight: run again once the date changes.
+      this.registerInterval(window.setInterval(() => {
+        if (toIso(todayNow()) !== this.lastRunDay) this.withUndo(this.t('undoNewDay'), () => this.dailyRun(true));
+      }, 10 * 60 * 1000));
+    }
+
+    // Called again when the interface language changes: a command added
+    // with an id already in use replaces the old one, so the palette shows
+    // the new names at once.
+    registerCommands() {
+      const t = (key) => this.t(key, this.noteWords());
       this.addCommand({
         id: 'generate-month',
         name: t('cmdGenerateMonth'),
@@ -1656,14 +1885,6 @@ if (obsidian) {
           return true;
         },
       });
-      // Same action in the right-click / long-press menu of the editor.
-      this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, view) => {
-        if (!this.isDailyView(view)) return;
-        menu.addItem((item) => item
-          .setTitle(t('cmdMoveNextMonth'))
-          .setIcon('calendar-plus')
-          .onClick(() => this.moveSelectionToNextMonth(editor)));
-      }));
       this.addCommand({
         id: 'week-alert',
         name: t('cmdWeekAlert'),
@@ -1695,16 +1916,92 @@ if (obsidian) {
           this.say('forgotDays');
         },
       });
-
-      this.app.workspace.onLayoutReady(async () => {
-        await this.refreshCache();
-        this.registerEvent(this.app.vault.on('modify', (f) => this.onModify(f)));
-        await this.withUndo(this.t('undoStartup'), () => this.dailyRun(true));
+      this.addCommand({
+        id: 'setup',
+        name: t('cmdSetup'),
+        callback: () => this.openSetup(false),
       });
-      // Obsidian left open overnight: run again once the date changes.
-      this.registerInterval(window.setInterval(() => {
-        if (toIso(todayNow()) !== this.lastRunDay) this.withUndo(this.t('undoNewDay'), () => this.dailyRun(true));
-      }, 10 * 60 * 1000));
+    }
+
+    // --- setup --------------------------------------------------------------
+
+    dailyFile() {
+      return this.file(this.settings.dailyPath);
+    }
+
+    // Asks for the daily plan note (and the language). `atStart`: run the
+    // start-up work once a note is chosen.
+    openSetup(atStart) {
+      if (this.setupOpen) return;
+      this.setupOpen = true;
+      const missing = this.settings.dailyPath && !this.dailyFile() ? this.settings.dailyPath : null;
+      new SetupModal(this, missing, async (path, lang) => {
+        this.setupOpen = false;
+        if (!path) return;
+        this.settings.uiLanguage = lang;
+        this.settings.noteLanguage = lang;
+        const hotkeys = await this.readHotkeys();
+        await this.app.vault.create(path, buildCheatSheet(lang, lang, hotkeys, isMac()));
+        this.settings.dailyPath = path;
+        await this.saveState();
+        this.registerCommands();
+        await this.refreshCache();
+        this.app.workspace.openLinkText(path, '', false);
+        this.say('setupDone', { file: this.dailyName(), cmd: this.t('cmdGenerateMonth') });
+        if (atStart) await this.withUndo(this.t('undoStartup'), () => this.dailyRun(true));
+      }).open();
+    }
+
+    // --- cheat sheet -----------------------------------------------------------
+
+    hotkeysPath() {
+      return normalizePath(`${this.app.vault.configDir}/hotkeys.json`);
+    }
+
+    async readHotkeys() {
+      const adapter = this.app.vault.adapter;
+      try {
+        if (!(await adapter.exists(this.hotkeysPath()))) return {};
+        return JSON.parse(await adapter.read(this.hotkeysPath())) || {};
+      } catch (_e) {
+        return {};
+      }
+    }
+
+    async checkHotkeys() {
+      let mtime = 0;
+      try {
+        const st = await this.app.vault.adapter.stat(this.hotkeysPath());
+        mtime = st ? st.mtime : 0;
+      } catch (_e) {
+        mtime = 0;
+      }
+      if (this.hotkeysMtime === undefined) this.hotkeysMtime = mtime;
+      if (mtime === this.hotkeysMtime) return;
+      this.hotkeysMtime = mtime;
+      await this.refreshCheatSheet();
+    }
+
+    // Rewrites the cheat sheet in the daily note, if the user kept it.
+    async refreshCheatSheet() {
+      const f = this.dailyFile();
+      if (!f) return;
+      const hotkeys = await this.readHotkeys();
+      const update = (text) => updateCheatSheet(text, this.ui(), this.settings.noteLanguage, hotkeys, isMac());
+      const text = await this.app.vault.read(f);
+      if (update(text) === text) return;
+      await this.app.vault.process(f, update);
+    }
+
+    async onRename(f, oldPath) {
+      let changed = false;
+      for (const k of PATH_KEYS) {
+        if (this.settings[k] && normalizePath(this.settings[k]) === oldPath) {
+          this.settings[k] = f.path;
+          changed = true;
+        }
+      }
+      if (changed) await this.saveState();
     }
 
     // --- state --------------------------------------------------------------
@@ -1772,15 +2069,21 @@ if (obsidian) {
     // --- files --------------------------------------------------------------
 
     file(path) {
+      if (!path) return null;
       const f = this.app.vault.getAbstractFileByPath(normalizePath(path));
       return f instanceof TFile ? f : null;
     }
 
     async readSources() {
-      const read = async (p, optional) => {
+      // Routine files are optional; one that is set but missing is reported
+      // once per session (a start-up run reads them several times).
+      if (!this.warned) this.warned = new Set();
+      const read = async (p) => {
+        if (!p) return '';
         const f = this.file(p);
         if (!f) {
-          if (!optional) this.say('fileNotFound', { path: p });
+          if (!this.warned.has(p)) this.say('fileNotFound', { path: p });
+          this.warned.add(p);
           return '';
         }
         return this.app.vault.read(f);
@@ -1789,7 +2092,7 @@ if (obsidian) {
         await read(this.settings.weeklyPath),
         await read(this.settings.monthlyPath),
         await read(this.settings.yearlyPath),
-        await read(this.settings.holidaysPath, true),
+        await read(this.settings.holidaysPath),
       );
       src.tradingSundays = this.settings.tradingSundays;
       src.workTag = (this.settings.workTag || '').trim();
@@ -1817,9 +2120,9 @@ if (obsidian) {
     // user edited it in between, the marks `fn` set are rolled back and the
     // whole step runs again on the new text.
     async editDaily(fn) {
-      const f = this.file(this.settings.dailyPath);
+      const f = this.dailyFile();
       if (!f) {
-        this.say('fileNotFound', { path: this.settings.dailyPath });
+        this.openSetup(false);
         return null;
       }
       const today = todayNow();
@@ -1877,9 +2180,9 @@ if (obsidian) {
         this.say('nothingToUndo');
         return;
       }
-      const f = this.file(this.settings.dailyPath);
+      const f = this.dailyFile();
       if (!f) {
-        this.say('fileNotFound', { path: this.settings.dailyPath });
+        this.openSetup(false);
         return;
       }
       const current = await this.app.vault.read(f);
@@ -1896,7 +2199,7 @@ if (obsidian) {
     // --- daily run ----------------------------------------------------------
 
     async dailyRun(showReview) {
-      if (this.busy) return;
+      if (this.busy || !this.dailyFile()) return;
       this.busy = true;
       try {
         const today = todayNow();
@@ -2000,6 +2303,7 @@ if (obsidian) {
     async doGenerate(y, m, verbose) {
       const src = await this.readSources();
       const res = await this.editDaily((model, today) => {
+        if (verbose) forgetMonthIfAbsent(model, y, m, this.state);
         const r = generateMonth(model, src, y, m, today, this.state);
         return Object.assign(r, { changed: r.added > 0 || r.days > 0 });
       });
@@ -2105,7 +2409,83 @@ if (obsidian) {
 
   const LABEL_KEY = { WOLNE: 'labelDayOff', HANDLOWA: 'labelShoppingSunday' };
 
-  // Dialogs get the plugin for its texts (plugin.t) and its app.
+  // First run (or the daily note is gone): language + name of the new daily
+  // plan note. `done(path, lang)`; path is null when closed without creating.
+  class SetupModal extends Modal {
+    constructor(plugin, missingPath, done) {
+      super(plugin.app);
+      this.plugin = plugin;
+      this.missingPath = missingPath;
+      this.done = done;
+      this.result = null;
+      this.name = DEFAULT_DAILY;
+      // English unless this vault already uses another language.
+      this.lang = plugin.settings.dailyPath && UI[plugin.settings.noteLanguage] ? plugin.settings.noteLanguage : 'en';
+    }
+    onOpen() {
+      this.render();
+    }
+    render() {
+      const { contentEl } = this;
+      const t = (key, vars) => uiText(this.lang, key, vars);
+      contentEl.empty();
+      contentEl.addClass('plain-planner-setup');
+      contentEl.createEl('h2', { text: t('setupTitle') });
+
+      const langRow = contentEl.createDiv({ cls: 'plain-planner-setup-row' });
+      langRow.createEl('strong', { text: t('setupLanguage') });
+      const sel = langRow.createEl('select', { cls: 'dropdown' });
+      for (const [value, label] of [['en', 'English'], ['pl', 'Polski']]) sel.createEl('option', { value, text: label });
+      sel.value = this.lang;
+      sel.addEventListener('change', () => {
+        this.lang = sel.value;
+        this.render();
+      });
+      contentEl.createEl('p', { cls: 'plain-planner-note', text: t('setupLanguageDesc') });
+
+      contentEl.createEl('p', { text: t('setupIntro') });
+      if (this.missingPath) contentEl.createEl('p', { cls: 'plain-planner-warn', text: t('setupMissing', { path: this.missingPath }) });
+
+      const nameRow = contentEl.createDiv({ cls: 'plain-planner-setup-row' });
+      nameRow.createEl('strong', { text: t('setupName') });
+      const input = nameRow.createEl('input', { type: 'text', cls: 'plain-planner-setup-name' });
+      input.value = this.name;
+      nameRow.createSpan({ cls: 'plain-planner-note', text: '.md' });
+      const error = contentEl.createEl('p', { cls: 'plain-planner-warn' });
+
+      const buttons = contentEl.createDiv({ cls: 'plain-planner-buttons' });
+      const create = buttons.createEl('button', { text: t('setupCreateBtn'), cls: 'mod-cta' });
+      const check = () => {
+        this.name = input.value;
+        const file = noteFileName(input.value);
+        let msg = '';
+        if (!file) msg = t('setupBadName');
+        else if (this.app.vault.getAbstractFileByPath(file)) msg = t('setupExists', { file: file.replace(/\.md$/, '') });
+        error.setText(msg);
+        error.toggle(!!msg);
+        create.disabled = !!msg;
+        return msg ? null : file;
+      };
+      input.addEventListener('input', check);
+      const submit = () => {
+        const file = check();
+        if (!file) return;
+        this.result = file;
+        this.close();
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submit();
+      });
+      create.addEventListener('click', submit);
+      check();
+      input.focus();
+    }
+    onClose() {
+      this.contentEl.empty();
+      this.done(this.result, this.lang);
+    }
+  }
+
   class WeekAlertModal extends Modal {
     constructor(plugin, days, today, resolve) {
       super(plugin.app);
@@ -2481,6 +2861,10 @@ if (obsidian) {
       if (v === null) return;
       this.plugin.settings[key] = v;
       await this.plugin.saveState();
+      if (key === 'uiLanguage' || key === 'noteLanguage') {
+        this.plugin.registerCommands();
+        await this.plugin.refreshCheatSheet();
+      }
       return v;
     }
 

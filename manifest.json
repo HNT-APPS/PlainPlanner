@@ -1,7 +1,7 @@
 {
   "id": "plain-planner",
   "name": "Plain Planner",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "minAppVersion": "1.4.0",
   "description": "Builds a plain-text plan for every day from your weekly, monthly and yearly routines, holidays and days off. No calendar views, just what to do today.",
   "author": "HNT Apps",

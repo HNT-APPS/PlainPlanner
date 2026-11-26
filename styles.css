@@ -92,3 +92,29 @@
 .plain-planner-warn {
   color: var(--text-error);
 }
+
+/* Setup dialog */
+.plain-planner-setup-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+}
+.plain-planner-setup-row + .plain-planner-note {
+  margin-top: 0.25em;
+}
+.plain-planner-setup-row {
+  margin-top: 0.75em;
+}
+.plain-planner-setup-name {
+  flex: 1;
+}
+
+/* Command cheat sheet at the top of the daily note: "> [!plain-planner]-" */
+.callout[data-callout="plain-planner"] {
+  --callout-color: var(--callout-quote);
+  --callout-icon: lucide-keyboard;
+  font-size: var(--font-smaller);
+}
+.callout[data-callout="plain-planner"] .callout-title {
+  font-size: var(--font-smaller);
+}
