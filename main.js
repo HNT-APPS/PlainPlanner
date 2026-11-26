@@ -136,8 +136,9 @@ function appendLine(lines, line) {
   lines.push(line);
 }
 
-// The TODO DAILY file has no year in it, so a DD.MM date belongs to whichever
-// year puts it closest to today (a rolling +/- 6 month window).
+// Where no year is written (a day heading outside its month, an older month
+// header), a DD.MM date belongs to whichever year puts it closest to today
+// (a rolling +/- 6 month window).
 function resolveYear(m, d, today) {
   const t = new Date(today.y, today.m - 1, today.d).getTime();
   let best = today.y;
@@ -1200,15 +1201,65 @@ function monthAtLine(lines, idx, today) {
   return day ? { y: resolveYear(day.m, day.d, today), m: day.m } : null;
 }
 
+// Backlog note when none is set: BACKLOG.md next to the daily note.
+function backlogDefaultPath(dailyPath) {
+  const i = (dailyPath || '').lastIndexOf('/');
+  return i >= 0 ? `${dailyPath.slice(0, i)}/BACKLOG.md` : 'BACKLOG.md';
+}
+
+// Lines from..to (inclusive) that can be moved: not headings, not blank.
+function movableLines(lines, from, to) {
+  const picked = [];
+  for (let i = from; i <= to && i < lines.length; i++) {
+    if (lines[i].trim() && !/^\s*#/.test(lines[i])) picked.push(i);
+  }
+  return picked;
+}
+
+// The backlog note holds tasks for later years under "# 2027", "# 2028", ...
+// Adds `moved` at the end of the year's section (created, in year order, when
+// missing). Anything else in the note is left as it is.
+function addToBacklog(text, year, moved) {
+  const lines = text ? splitLines(text) : [];
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  const yearOf = (l) => {
+    const h = /^#(?!#)\s*(\d{4})\s*$/.exec(l);
+    return h ? +h[1] : null;
+  };
+  const start = lines.findIndex((l) => yearOf(l) === year);
+  if (start >= 0) {
+    let end = start + 1;
+    while (end < lines.length && !/^#(?!#)\s/.test(lines[end])) end++;
+    let at = end;
+    while (at > start + 1 && !lines[at - 1].trim()) at--;
+    lines.splice(at, 0, ...moved);
+  } else {
+    let at = lines.findIndex((l) => yearOf(l) !== null && yearOf(l) > year);
+    if (at < 0) at = lines.length;
+    const block = [`# ${year}`, ...moved];
+    if (at > 0 && lines[at - 1].trim()) block.unshift('');
+    if (at < lines.length) block.push('');
+    lines.splice(at, 0, ...block);
+  }
+  return lines.join('\n') + '\n';
+}
+
+// Takes lines from..to out of TODO DAILY for the backlog. Returns
+// { text, moved } or null when there is nothing to move.
+function takeLinesForBacklog(text, from, to) {
+  const lines = splitLines(text);
+  const picked = movableLines(lines, from, to);
+  if (!picked.length) return null;
+  const drop = new Set(picked);
+  return { text: lines.filter((_, i) => !drop.has(i)).join('\n'), moved: picked.map((i) => lines[i]) };
+}
+
 // Moves lines from..to (inclusive, headings and blank lines skipped) to the
 // "BEZ DATY" block of the month after the one they sit in (never earlier than
 // the month after today). Returns the new text, or null when nothing moved.
 function moveLinesToNextMonth(text, from, to, today, lang) {
   const lines = splitLines(text);
-  const picked = [];
-  for (let i = from; i <= to && i < lines.length; i++) {
-    if (lines[i].trim() && !/^\s*#/.test(lines[i])) picked.push(i);
-  }
+  const picked = movableLines(lines, from, to);
   if (!picked.length) return null;
   let base = monthAtLine(lines, from, today) || { y: today.y, m: today.m };
   if (dateNum(base.y, base.m, 1) < dateNum(today.y, today.m, 1)) base = { y: today.y, m: today.m };
@@ -1334,6 +1385,7 @@ const UI = {
     cmdYearlyRest: 'Rozpisz rok',
     cmdReview: 'Przegląd zaległych dni',
     cmdMoveNextMonth: 'Przenieś na następny miesiąc ({undated})',
+    cmdMoveBacklog: 'Przenieś do backlogu ({year})',
     cmdWeekAlert: 'Pokaż święta w tym tygodniu',
     cmdRunNow: 'Uruchom teraz (jak przy starcie Obsidiana)',
     cmdUndoLast: 'Cofnij ostatnie rozpisanie',
@@ -1388,6 +1440,7 @@ const UI = {
     noOverdue: 'brak zaległych dni.',
     selectTaskLine: 'zaznacz linię z zadaniem (nie nagłówek).',
     movedToNextMonth: 'przeniesiono {n} → {month} {year}, {undated}.',
+    movedToBacklog: 'przeniesiono {n} → {file}, rok {year}.',
     reviewApplied: 'przeniesione {moved}, usunięte {deleted}, zamknięte dni {closed}.',
 
     weekTitle: 'W tym tygodniu',
@@ -1466,6 +1519,8 @@ const UI = {
     setMonthlyPath: 'Rutyna miesięczna',
     setYearlyPath: 'Rutyna roczna',
     setHolidaysPath: 'Święta (opcjonalny)',
+    setBacklogPath: 'Backlog',
+    setBacklogPathDesc: 'Zadania na kolejne lata, pod nagłówkami „# 2027”, „# 2028”. Puste: BACKLOG.md obok pliku planu dnia. Plik powstaje przy pierwszym przeniesieniu.',
     setWorkTag: 'Tag pomijany w dni wolne',
     setWorkTagDesc: 'Linie rutyny tygodniowej z tym tagiem nie trafiają do dni oznaczonych „- {dayOff}”. Puste = nie pomijaj.',
     setTradingSundays: 'Niedziele handlowe',
@@ -1484,6 +1539,7 @@ const UI = {
     cmdYearlyRest: 'Fill in the year',
     cmdReview: 'Review past days',
     cmdMoveNextMonth: 'Move to next month ({undated})',
+    cmdMoveBacklog: 'Move to backlog ({year})',
     cmdWeekAlert: 'Show holidays this week',
     cmdRunNow: 'Run now (as on Obsidian start-up)',
     cmdUndoLast: 'Undo the last fill-in',
@@ -1538,6 +1594,7 @@ const UI = {
     noOverdue: 'no past days to review.',
     selectTaskLine: 'select a task line (not a heading).',
     movedToNextMonth: 'moved {n} → {month} {year}, {undated}.',
+    movedToBacklog: 'moved {n} → {file}, year {year}.',
     reviewApplied: 'moved {moved}, deleted {deleted}, days closed {closed}.',
 
     weekTitle: 'This week',
@@ -1616,6 +1673,8 @@ const UI = {
     setMonthlyPath: 'Monthly routine',
     setYearlyPath: 'Yearly routine',
     setHolidaysPath: 'Holidays (optional)',
+    setBacklogPath: 'Backlog',
+    setBacklogPathDesc: 'Tasks for later years, under "# 2027", "# 2028" headings. Empty: BACKLOG.md next to the daily note. The file is created on the first move.',
     setWorkTag: 'Tag skipped on days off',
     setWorkTagDesc: 'Weekly routine lines with this tag are left out of days marked "- {dayOff}". Empty = do not skip.',
     setTradingSundays: 'Shopping Sundays',
@@ -1677,6 +1736,7 @@ const CHEAT_COMMANDS = [
   ['review', 'cmdReview'],
   ['forget-filled', 'cmdForget'],
   ['move-next-month', 'cmdMoveNextMonth'],
+  ['move-to-backlog', 'cmdMoveBacklog'],
   ['week-alert', 'cmdWeekAlert'],
   ['yearly-rest', 'cmdYearlyRest'],
   ['run-now', 'cmdRunNow'],
@@ -1706,13 +1766,14 @@ function hotkeysOf(hotkeys, id) {
 }
 
 // Rows of the sheet: { label, combos: [['Ctrl', 'P'], ...], after }.
-function cheatEntries(lang, noteLang, hotkeys, isMac) {
+function cheatEntries(lang, noteLang, hotkeys, isMac, year) {
   const combos = (id) => hotkeysOf(hotkeys, id).map((h) => hotkeyParts(h, isMac));
   const undated = langOf(noteLang).undated;
   const rows = [{ label: uiText(lang, 'cheatPaletteName'), combos: combos(PALETTE_ID), after: uiText(lang, 'cheatPaletteAfter') }];
   for (const [id, key] of CHEAT_COMMANDS) {
-    const after = id === 'move-next-month' ? uiText(lang, 'cheatMenuAfter') : null;
-    rows.push({ label: uiText(lang, key, { undated }), combos: combos(`${PLUGIN_ID}:${id}`), after });
+    const menu = id === 'move-next-month' || id === 'move-to-backlog';
+    const after = menu ? uiText(lang, 'cheatMenuAfter') : null;
+    rows.push({ label: uiText(lang, key, { undated, year }), combos: combos(`${PLUGIN_ID}:${id}`), after });
   }
   return rows;
 }
@@ -1751,7 +1812,7 @@ const core = {
   parseWeekly, parseMonthly, parseYearly, parseHolidays, parseSources,
   easterOf, adventOf, tradingSundays, computeCalendar, migrateFilledHolidays, stripWorkOnDaysOff, setLineChecked, uncheckAll,
   parseDaily, serializeDaily, parseRoutineLine, routinePresence,
-  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest, addYearSkeleton, yearMonths, monthHeaderInfo, forgetMonthIfAbsent,
+  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest, addYearSkeleton, addToBacklog, takeLinesForBacklog, backlogDefaultPath, yearMonths, monthHeaderInfo, forgetMonthIfAbsent,
   collectReview, reviewNeeded, applyReview, moveLinesToNextMonth,
   weeklySnapshot, monthlySnapshot, weekStart, weekAhead, weekSignature, shouldShowWeekAlert, routinesChanged, applyWeeklyChange, applyMonthlyChange,
   checkboxStates, diffStates, applySyncMonthly, applySyncYearly,
@@ -1781,6 +1842,7 @@ if (obsidian) {
     monthlyPath: '',
     yearlyPath: '',
     holidaysPath: '',
+    backlogPath: '',
     tradingSundays: true,
     workTag: '#praca',
     autoGenerate: false,
@@ -1790,7 +1852,7 @@ if (obsidian) {
   };
   const MAX_BACKUPS = 20;
   const DEFAULT_DAILY = 'TODO DAILY';
-  const PATH_KEYS = ['dailyPath', 'weeklyPath', 'monthlyPath', 'yearlyPath', 'holidaysPath'];
+  const PATH_KEYS = ['dailyPath', 'weeklyPath', 'monthlyPath', 'yearlyPath', 'holidaysPath', 'backlogPath'];
 
   const todayNow = () => fromDate(new Date());
   const notify = (msg) => new Notice(`Plain Planner: ${msg}`);
@@ -1832,6 +1894,10 @@ if (obsidian) {
           .setTitle(this.t('cmdMoveNextMonth', this.noteWords()))
           .setIcon('calendar-plus')
           .onClick(() => this.moveSelectionToNextMonth(editor)));
+        menu.addItem((item) => item
+          .setTitle(this.t('cmdMoveBacklog', { year: todayNow().y + 1 }))
+          .setIcon('archive')
+          .onClick(() => this.moveSelectionToBacklog(editor)));
       }));
       this.cheats = new Set();
       this.cheatOpen = false;
@@ -1850,7 +1916,13 @@ if (obsidian) {
       this.registerInterval(window.setInterval(() => this.checkHotkeys(), 3000));
       // Obsidian left open overnight: run again once the date changes.
       this.registerInterval(window.setInterval(() => {
-        if (toIso(todayNow()) !== this.lastRunDay) this.withUndo(this.t('undoNewDay'), () => this.dailyRun(true));
+        if (toIso(todayNow()) === this.lastRunDay) return;
+        // New year: the backlog command names the next year.
+        if (this.lastRunDay && +this.lastRunDay.slice(0, 4) !== todayNow().y) {
+          this.registerCommands();
+          this.refreshCheatSheet();
+        }
+        this.withUndo(this.t('undoNewDay'), () => this.dailyRun(true));
       }, 10 * 60 * 1000));
     }
 
@@ -1880,6 +1952,15 @@ if (obsidian) {
         editorCheckCallback: (checking, editor, view) => {
           if (!this.isDailyView(view)) return false;
           if (!checking) this.moveSelectionToNextMonth(editor);
+          return true;
+        },
+      });
+      this.addCommand({
+        id: 'move-to-backlog',
+        name: this.t('cmdMoveBacklog', { year: todayNow().y + 1 }),
+        editorCheckCallback: (checking, editor, view) => {
+          if (!this.isDailyView(view)) return false;
+          if (!checking) this.moveSelectionToBacklog(editor);
           return true;
         },
       });
@@ -2384,6 +2465,33 @@ if (obsidian) {
       });
     }
 
+    backlogPath() {
+      return normalizePath(this.settings.backlogPath || backlogDefaultPath(this.settings.dailyPath));
+    }
+
+    // Lines with the cursor or selection go to "# <next year>" of the backlog
+    // note (created on first use). The backlog is written first, so a failed
+    // write leaves TODO DAILY as it was.
+    async moveSelectionToBacklog(editor) {
+      const from = editor.getCursor('from').line;
+      const to = editor.getCursor('to').line;
+      const before = editor.getValue();
+      const res = takeLinesForBacklog(before, from, to);
+      if (!res) {
+        this.say('selectTaskLine');
+        return;
+      }
+      const year = todayNow().y + 1;
+      const path = this.backlogPath();
+      const f = this.file(path);
+      if (f) await this.app.vault.process(f, (text) => addToBacklog(text, year, res.moved));
+      else await this.app.vault.create(path, addToBacklog('', year, res.moved));
+      await this.backup(before);
+      editor.setValue(res.text);
+      editor.setCursor({ line: Math.min(from, editor.lineCount() - 1), ch: 0 });
+      this.say('movedToBacklog', { n: res.moved.length, file: path.replace(/\.md$/, ''), year });
+    }
+
     async applyReviewDecisions(decisions) {
       return this.withUndo(this.t('undoReview'), () => this.doApplyReview(decisions));
     }
@@ -2453,7 +2561,7 @@ if (obsidian) {
       det.createEl('summary', { text: `Plain Planner – ${uiText(lang, 'cheatTitle')}` });
       // Two columns, no header row: command | hotkeys.
       const body = det.createEl('table').createEl('tbody');
-      for (const row of cheatEntries(lang, plugin.settings.noteLanguage, hotkeys, isMac())) {
+      for (const row of cheatEntries(lang, plugin.settings.noteLanguage, hotkeys, isMac(), todayNow().y + 1)) {
         const tr = body.createEl('tr');
         tr.createEl('td', { cls: 'plain-planner-cheat-label', text: row.label });
         const keys = tr.createEl('td', { cls: 'plain-planner-cheat-keys' });
@@ -2893,6 +3001,7 @@ if (obsidian) {
           { key: 'monthlyPath', type: 'file', name: t('setMonthlyPath') },
           { key: 'yearlyPath', type: 'file', name: t('setYearlyPath') },
           { key: 'holidaysPath', type: 'file', name: t('setHolidaysPath') },
+          { key: 'backlogPath', type: 'file', name: t('setBacklogPath'), desc: t('setBacklogPathDesc') },
         ],
       },
       {

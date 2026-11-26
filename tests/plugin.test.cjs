@@ -234,3 +234,28 @@ test('fill in the year: points to "Fill in a month" while the current month is m
   await plugin.doYearlyRest(true);
   assert.ok(!obsidianStub.notices.some((n) => n.includes('Fill in a month')));
 });
+
+test('backlog: the command creates BACKLOG.md on first use, then appends to it', async () => {
+  const { plugin, files } = makePlugin({ 'TODO DAILY.md': '### 12.11 CZWARTEK\n- [ ] rower\n- [ ] kask\n' });
+  await plugin.loadState();
+  plugin.backup = async () => {};
+  const year = new Date().getFullYear() + 1;
+  let text = files['TODO DAILY.md'];
+  let cursor = { from: 1, to: 1 };
+  const editor = {
+    getCursor: (w) => ({ line: cursor[w], ch: 0 }),
+    getValue: () => text,
+    setValue: (v) => { text = v; },
+    setCursor: () => {},
+    lineCount: () => text.split('\n').length,
+  };
+  await plugin.moveSelectionToBacklog(editor);
+  assert.equal(files['BACKLOG.md'], `# ${year}\n- [ ] rower\n`);
+  assert.equal(text, '### 12.11 CZWARTEK\n- [ ] kask\n');
+  await plugin.moveSelectionToBacklog(editor);
+  assert.equal(files['BACKLOG.md'], `# ${year}\n- [ ] rower\n- [ ] kask\n`);
+  obsidianStub.notices.length = 0;
+  cursor = { from: 0, to: 0 };
+  await plugin.moveSelectionToBacklog(editor);
+  assert.equal(obsidianStub.notices.length, 1, 'a heading is not moved');
+});

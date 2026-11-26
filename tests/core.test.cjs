@@ -720,7 +720,7 @@ test('daily note: text above the plan and under an own # / ## heading below it i
 
 test('cheat sheet: rows with current hotkeys, a block above the plan', () => {
   const hk = { 'plain-planner:generate-month': [{ modifiers: ['Shift', 'Mod'], key: 'm' }], 'plain-planner:review': [] };
-  const rows = core.cheatEntries('pl', 'pl', hk, false);
+  const rows = core.cheatEntries('pl', 'pl', hk, false, 2027);
   assert.deepEqual(rows[0], { label: 'Paleta komend', combos: [['Ctrl', 'P']], after: 'potem wpisz „Plain Planner”' });
   assert.deepEqual(rows[1], { label: 'Rozpisz miesiąc', combos: [['Ctrl', 'Shift', 'M']], after: null });
   assert.deepEqual(rows.find((r) => r.label === 'Przegląd zaległych dni').combos, []);
@@ -729,7 +729,7 @@ test('cheat sheet: rows with current hotkeys, a block above the plan', () => {
   assert.equal(rows.length, core.CHEAT_COMMANDS.length + 1);
   assert.deepEqual(rows.map((r) => r.label), [
     'Paleta komend', 'Rozpisz miesiąc', 'Cofnij ostatnie rozpisanie', 'Przegląd zaległych dni',
-    'Zapomnij rozpisane dni (rozpisz od nowa)', 'Przenieś na następny miesiąc (BEZ DATY)',
+    'Zapomnij rozpisane dni (rozpisz od nowa)', 'Przenieś na następny miesiąc (BEZ DATY)', 'Przenieś do backlogu (2027)',
     'Pokaż święta w tym tygodniu', 'Rozpisz rok', 'Uruchom teraz (jak przy starcie Obsidiana)',
   ]);
   const en = core.cheatEntries('en', 'pl', { 'command-palette:open': [] }, true);
@@ -768,4 +768,19 @@ test('note file name from the setup dialog', () => {
   assert.equal(core.noteFileName(' TODO DAILY '), 'TODO DAILY.md');
   assert.equal(core.noteFileName('Plan.md'), 'Plan.md');
   for (const bad of ['', '   ', 'a/b', 'a:b', '#x', '.hidden', 'a[1]']) assert.equal(core.noteFileName(bad), null, bad);
+});
+
+test('backlog: lines go under "# <year>", sections in year order, other text kept', () => {
+  assert.equal(core.backlogDefaultPath('TODO DAILY.md'), 'BACKLOG.md');
+  assert.equal(core.backlogDefaultPath('Plan/TODO DAILY.md'), 'Plan/BACKLOG.md');
+  assert.equal(core.addToBacklog('', 2027, ['- [ ] rower']), '# 2027\n- [ ] rower\n');
+  const two = core.addToBacklog('Moje notatki\n\n# 2028\n- [ ] dom\n', 2027, ['- [ ] rower']);
+  assert.equal(two, 'Moje notatki\n\n# 2027\n- [ ] rower\n\n# 2028\n- [ ] dom\n');
+  const more = core.addToBacklog(two, 2027, ['- [ ] kask', 'buty']);
+  assert.equal(more, 'Moje notatki\n\n# 2027\n- [ ] rower\n- [ ] kask\nbuty\n\n# 2028\n- [ ] dom\n');
+  assert.equal(core.addToBacklog('# 2026\nx\n', 2027, ['y']), '# 2026\nx\n\n# 2027\ny\n');
+  const t = core.takeLinesForBacklog('## **LISTOPAD 2026**\n### 12.11 CZWARTEK\n- [ ] rower\nzostaje\n', 0, 2);
+  assert.deepEqual(t.moved, ['- [ ] rower']);
+  assert.equal(t.text, '## **LISTOPAD 2026**\n### 12.11 CZWARTEK\nzostaje\n');
+  assert.equal(core.takeLinesForBacklog('### 12.11 CZWARTEK\n', 0, 0), null);
 });
