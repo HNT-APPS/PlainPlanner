@@ -628,3 +628,27 @@ test('labelText maps canonical and translated labels, keeps custom ones', () => 
   assert.equal(core.labelText('wyjazd', 'en'), 'wyjazd');
   assert.equal(core.labelText('', 'en'), '');
 });
+
+test('ui: every language has the same keys and the same {placeholders}', () => {
+  const ph = (s) => (s.match(/\{\w+\}/g) || []).sort().join(',');
+  const keys = Object.keys(core.UI.en).sort();
+  for (const [lang, dict] of Object.entries(core.UI)) {
+    assert.deepEqual(Object.keys(dict).sort(), keys, lang);
+    // Date formats pick different fields ({dd}.{mm} vs {mon} {d}).
+    for (const k of keys) if (!['dayHead', 'dateTime'].includes(k)) assert.equal(ph(dict[k]), ph(core.UI.en[k]), `${lang}.${k}`);
+  }
+});
+
+test('ui: texts, language choice and dates', () => {
+  assert.equal(core.uiText('en', 'monthFilled', { month: 'May', days: 3, added: 5 }), 'May – new days: 3, tasks added: 5.');
+  assert.equal(core.uiText('pl', 'fileNotFound', { path: 'a.md' }), 'nie znaleziono pliku a.md');
+  assert.equal(core.uiText('de', 'ok'), 'OK'); // unknown language -> English
+  assert.equal(core.resolveUiLang('auto', 'pl'), 'pl');
+  assert.equal(core.resolveUiLang('auto', 'de'), 'en');
+  assert.equal(core.resolveUiLang('pl', 'en'), 'pl');
+  assert.equal(core.uiMonth('pl', 11), 'listopad');
+  assert.equal(core.uiMonth('en', 11), 'November');
+  assert.equal(core.uiDayHead('pl', T, 'today'), 'Czwartek 12.11 (dziś)');
+  assert.equal(core.uiDayHead('en', T, null), 'Thursday, Nov 12');
+  assert.equal(core.uiDayHead('en', T, 'tomorrow'), 'Thursday, Nov 12 (tomorrow)');
+});

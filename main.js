@@ -56,10 +56,6 @@ const LANGS = {
 const DEFAULT_LANG = 'pl';
 const langOf = (code) => LANGS[code] || LANGS[DEFAULT_LANG];
 const ALL_LANGS = Object.values(LANGS);
-// Polish names, still used by the (Polish-only, for now) user interface.
-const MONTHS = LANGS.pl.months;
-const WEEKDAYS = LANGS.pl.weekdays;
-const UNDATED = LANGS.pl.undated;
 const UNDATED_NAMES = new Set(ALL_LANGS.map((l) => l.undated));
 const DAY_OFF_RE = new RegExp(`(^|[\\s-])(${ALL_LANGS.map((l) => l.labels.WOLNE).join('|')})(?=$|[\\s-])`, 'i');
 // Day labels are kept in their canonical (Polish) form in the plugin state and
@@ -1046,15 +1042,8 @@ function shouldShowWeekAlert(days, alertState, today) {
 
 // --- review of past days ------------------------------------------------------
 
-const ACTIONS = {
-  today: 'Na dziś',
-  tomorrow: 'Na jutro',
-  date: 'Na wybrany dzień',
-  spread: 'Rozłóż na najbliższe dni',
-  nextMonth: 'Na następny miesiąc (BEZ DATY)',
-  delete: 'Usuń',
-  keep: 'Zostaw (zdecyduję później)',
-};
+// Actions for a line of a past day, in the order the review offers them.
+const ACTIONS = ['today', 'tomorrow', 'date', 'spread', 'nextMonth', 'delete', 'keep'];
 const DEFAULT_ACTION = { routine: 'today', holiday: 'delete', weekly: 'delete', own: 'keep' };
 
 function classifyLine(line, weeklyAll) {
@@ -1266,6 +1255,296 @@ function applySyncYearly(text, changes, today) {
   return out;
 }
 
+// --- user interface texts -------------------------------------------------------
+
+// Texts of commands, dialogs, notices and settings. `{name}` is filled in by
+// uiText. Counts are written as "label: n" so no plural forms are needed.
+// The UI language is separate from the note language (LANGS): someone may
+// use Obsidian in English and keep their notes in Polish.
+const UI = {
+  pl: {
+    cmdGenerateMonth: 'Rozpisz miesiąc',
+    cmdYearlyRest: 'Dodaj rutyny roczne do końca roku',
+    cmdReview: 'Przegląd zaległych dni',
+    cmdMoveNextMonth: 'Przenieś na następny miesiąc ({undated})',
+    cmdWeekAlert: 'Pokaż święta w tym tygodniu',
+    cmdRunNow: 'Uruchom teraz (jak przy starcie Obsidiana)',
+    cmdUndoLast: 'Cofnij ostatnie rozpisanie',
+    cmdForget: 'Zapomnij rozpisane dni (rozpisz od nowa)',
+
+    undoRunNow: 'Uruchom teraz',
+    undoStartup: 'start Obsidiana',
+    undoNewDay: 'nowy dzień',
+    undoGenerateMonth: 'Rozpisz miesiąc ({month})',
+    undoYearlyRest: 'Dodaj rutyny roczne do końca roku',
+    undoReview: 'Przegląd zaległych dni',
+
+    forgotDays: 'wtyczka zapomniała, które dni rozpisała.',
+    fileNotFound: 'nie znaleziono pliku {path}',
+    writeConflict: 'plik zmieniał się w trakcie zapisu, nic nie zmieniono. Spróbuj ponownie.',
+    nothingToUndo: 'nie ma czego cofać.',
+    undone: 'cofnięto „{label}”. Możesz rozpisać jeszcze raz.',
+    noHolidaysThisWeek: 'w tym tygodniu nie ma świąt ani niedziel handlowych.',
+    routineChangesApplied: 'zmiany rutyny zastosowane (zmienione miejsca: {n}).',
+    newMonthUnchecked: 'nowy miesiąc – rutyna miesięczna odznaczona.',
+    newYearUnchecked: 'nowy rok – rutyna roczna odznaczona.',
+    monthFilled: '{month} – nowe dni: {days}, dodane zadania: {added}.',
+    monthAlreadyFilled: '{month} jest już rozpisany, nic nie dodano.',
+    yearlyAdded: 'dodano zadania roczne do kolejnych miesięcy: {n}.',
+    yearlyAlreadyFilled: 'rutyny roczne do końca roku są już rozpisane.',
+    noOverdue: 'brak zaległych dni.',
+    selectTaskLine: 'zaznacz linię z zadaniem (nie nagłówek).',
+    movedToNextMonth: 'przeniesiono {n} → {month} {year}, {undated}.',
+    reviewApplied: 'przeniesione {moved}, usunięte {deleted}, zamknięte dni {closed}.',
+
+    weekTitle: 'W tym tygodniu',
+    whenToday: 'dziś',
+    whenTomorrow: 'jutro',
+    dayHead: '{weekday} {dd}.{mm}',
+    dateTime: '{dd}.{mm} {hh}:{min}',
+    toDo: 'do zrobienia: {text}',
+    labelDayOff: 'dzień wolny',
+    labelShoppingSunday: 'niedziela handlowa',
+    remindTomorrow: 'Przypomnij mi jutro',
+    ok: 'OK',
+
+    undoTitle: 'Cofnąć ostatnie rozpisanie?',
+    undoBody: 'Ostatnia zmiana wtyczki: „{label}” ({when}). {file} wróci do stanu sprzed niej, a wtyczka zapomni dni, które wtedy rozpisała, więc będzie można rozpisać je jeszcze raz.',
+    undoWarning: 'Uwaga: {file} zmienił się od tamtej pory (Twoje wpisy, odhaczenia albo Ctrl+Z). Te późniejsze zmiany też zostaną cofnięte. Obecny plik trafi do kopii w folderze backups wtyczki.',
+    cancel: 'Anuluj',
+    undo: 'Cofnij',
+
+    routineChangedWeekly: 'Zmieniła się rutyna tygodniowa',
+    routineChangedMonthly: 'Zmieniła się rutyna miesięczna',
+    routineChangedBoth: 'Zmieniła się rutyna tygodniowa i miesięczna',
+    routineChangeBody: 'Zastosować zmiany w dniach, które są już rozpisane? Twoje wpisy zostaną nietknięte, a usunięte (zrobione) zadania nie wrócą.',
+    no: 'Nie',
+    fromTomorrow: 'Od jutra',
+    fromToday: 'Od dziś',
+
+    monthPickPlaceholder: 'Który miesiąc rozpisać?',
+
+    reviewTitle: 'Przegląd zaległych dni',
+    actionToday: 'Na dziś',
+    actionTomorrow: 'Na jutro',
+    actionDate: 'Na wybrany dzień',
+    actionSpread: 'Rozłóż na najbliższe dni',
+    actionNextMonth: 'Na następny miesiąc ({undated})',
+    actionDelete: 'Usuń',
+    actionKeep: 'Zostaw (zdecyduję później)',
+    actionLater: 'Nie teraz',
+    actionSkip: 'Pomiń w tym roku',
+    typeDone: 'zrobione',
+    typeRoutine: 'rutyna',
+    typeHoliday: 'święto',
+    typeWeekly: 'tygodniowa',
+    typeOwn: 'własne',
+    typeYearly: 'roczna',
+    willBeDeleted: 'zostanie usunięte',
+    bulkSet: '— ustaw —',
+    bulkMixed: '— różne —',
+    sumDays: 'dni: {n}',
+    sumOwn: 'własne: {n}',
+    sumRoutine: 'z rutyn: {n}',
+    sumWeekly: 'tygodniowe: {n}',
+    sumHoliday: 'święta: {n}',
+    sumDone: 'zrobione: {n}',
+    sumOverdue: 'zaległe roczne: {n}',
+    bulkOwn: 'Wszystkie własne →',
+    bulkRoutine: 'Wszystkie z rutyn →',
+    bulkWeekly: 'Wszystkie tygodniowe →',
+    bulkOverdue: 'Wszystkie zaległe roczne →',
+    bulkDay: 'Cały dzień →',
+    emptyDay: 'Pusty – nagłówek zostanie usunięty.',
+    weeklyGroup: 'Rutyna tygodniowa: {n} – domyślnie usuń ',
+    overdueHeading: 'Niezrobione z rutyny rocznej (wcześniejsze miesiące)',
+    later: 'Później',
+    apply: 'Zastosuj',
+
+    headFiles: 'Pliki',
+    headBehaviour: 'Działanie',
+    setUiLanguage: 'Język interfejsu',
+    setUiLanguageDesc: 'Język komend, okien i komunikatów. Ustawienia zmienią się po ponownym otwarciu tej karty, a nazwy komend po ponownym uruchomieniu Obsidiana.',
+    optAuto: 'Automatycznie (jak Obsidian)',
+    setNoteLanguage: 'Język notatek',
+    setNoteLanguageDesc: 'Język nagłówków, które wtyczka dopisuje (dni tygodnia, miesiące, {undated}, {dayOff}). Pliki rutyn i świąt mogą być w obu językach.',
+    setDailyPath: 'Plik planu dnia',
+    setWeeklyPath: 'Rutyna tygodniowa',
+    setMonthlyPath: 'Rutyna miesięczna',
+    setYearlyPath: 'Rutyna roczna',
+    setHolidaysPath: 'Święta (opcjonalny)',
+    setWorkTag: 'Tag pomijany w dni wolne',
+    setWorkTagDesc: 'Linie rutyny tygodniowej z tym tagiem nie trafiają do dni oznaczonych „- {dayOff}”. Puste = nie pomijaj.',
+    setTradingSundays: 'Niedziele handlowe',
+    setTradingSundaysDesc: 'Dopisuje „- {shopping}” w nagłówku niedziel handlowych.',
+    setAutoGenerate: 'Rozpisuj automatycznie',
+    setAutoGenerateDesc: 'Po otwarciu Obsidiana rozpisuje bieżący miesiąc i dodaje rutyny roczne do końca roku.',
+    setSpreadDays: '„{spread}” – na ile dni',
+    setSpreadDaysDesc: 'Zadania z tą opcją trafiają po kolei na dziś i kolejne dni (1–31).',
+    setWeekAlert: 'Przypomnienie o świętach w tym tygodniu',
+    setWeekAlertDesc: 'Przy starcie pokazuje święta, dni wolne i niedziele handlowe od dziś do niedzieli.',
+    setAutoReview: 'Przegląd zaległych dni przy starcie',
+    setAutoReviewDesc: 'Wyłącz, jeśli wolisz uruchamiać go komendą lub skrótem klawiszowym.',
+  },
+  en: {
+    cmdGenerateMonth: 'Fill in a month',
+    cmdYearlyRest: 'Add yearly routines until the end of the year',
+    cmdReview: 'Review past days',
+    cmdMoveNextMonth: 'Move to next month ({undated})',
+    cmdWeekAlert: 'Show holidays this week',
+    cmdRunNow: 'Run now (as on Obsidian start-up)',
+    cmdUndoLast: 'Undo the last fill-in',
+    cmdForget: 'Forget filled-in days (fill in again)',
+
+    undoRunNow: 'Run now',
+    undoStartup: 'Obsidian start-up',
+    undoNewDay: 'new day',
+    undoGenerateMonth: 'Fill in a month ({month})',
+    undoYearlyRest: 'Add yearly routines until the end of the year',
+    undoReview: 'Review past days',
+
+    forgotDays: 'the plugin forgot which days it filled in.',
+    fileNotFound: 'file {path} not found',
+    writeConflict: 'the file changed while saving, nothing was changed. Please try again.',
+    nothingToUndo: 'nothing to undo.',
+    undone: 'undid "{label}". You can fill in again.',
+    noHolidaysThisWeek: 'no holidays or shopping Sundays this week.',
+    routineChangesApplied: 'routine changes applied (places changed: {n}).',
+    newMonthUnchecked: 'new month – monthly routine unchecked.',
+    newYearUnchecked: 'new year – yearly routine unchecked.',
+    monthFilled: '{month} – new days: {days}, tasks added: {added}.',
+    monthAlreadyFilled: '{month} is already filled in, nothing added.',
+    yearlyAdded: 'yearly tasks added to the coming months: {n}.',
+    yearlyAlreadyFilled: 'yearly routines until the end of the year are already filled in.',
+    noOverdue: 'no past days to review.',
+    selectTaskLine: 'select a task line (not a heading).',
+    movedToNextMonth: 'moved {n} → {month} {year}, {undated}.',
+    reviewApplied: 'moved {moved}, deleted {deleted}, days closed {closed}.',
+
+    weekTitle: 'This week',
+    whenToday: 'today',
+    whenTomorrow: 'tomorrow',
+    dayHead: '{weekday}, {mon} {d}',
+    dateTime: '{mon} {d}, {hh}:{min}',
+    toDo: 'to do: {text}',
+    labelDayOff: 'day off',
+    labelShoppingSunday: 'shopping Sunday',
+    remindTomorrow: 'Remind me tomorrow',
+    ok: 'OK',
+
+    undoTitle: 'Undo the last fill-in?',
+    undoBody: 'Last change made by the plugin: "{label}" ({when}). {file} goes back to how it was before it, and the plugin forgets the days it filled in then, so you can fill them in again.',
+    undoWarning: 'Warning: {file} has changed since then (your entries, checked boxes or Ctrl+Z). Those later changes will be undone too. The current file is saved to the backups folder of the plugin.',
+    cancel: 'Cancel',
+    undo: 'Undo',
+
+    routineChangedWeekly: 'The weekly routine has changed',
+    routineChangedMonthly: 'The monthly routine has changed',
+    routineChangedBoth: 'The weekly and monthly routines have changed',
+    routineChangeBody: 'Apply the changes to days that are already filled in? Your own entries stay untouched, and deleted (done) tasks do not come back.',
+    no: 'No',
+    fromTomorrow: 'From tomorrow',
+    fromToday: 'From today',
+
+    monthPickPlaceholder: 'Which month to fill in?',
+
+    reviewTitle: 'Review past days',
+    actionToday: 'To today',
+    actionTomorrow: 'To tomorrow',
+    actionDate: 'To a chosen day',
+    actionSpread: 'Spread over the next days',
+    actionNextMonth: 'To next month ({undated})',
+    actionDelete: 'Delete',
+    actionKeep: 'Keep (decide later)',
+    actionLater: 'Not now',
+    actionSkip: 'Skip this year',
+    typeDone: 'done',
+    typeRoutine: 'routine',
+    typeHoliday: 'holiday',
+    typeWeekly: 'weekly',
+    typeOwn: 'own',
+    typeYearly: 'yearly',
+    willBeDeleted: 'will be deleted',
+    bulkSet: '— set —',
+    bulkMixed: '— mixed —',
+    sumDays: 'days: {n}',
+    sumOwn: 'own: {n}',
+    sumRoutine: 'from routines: {n}',
+    sumWeekly: 'weekly: {n}',
+    sumHoliday: 'holidays: {n}',
+    sumDone: 'done: {n}',
+    sumOverdue: 'overdue yearly: {n}',
+    bulkOwn: 'All own →',
+    bulkRoutine: 'All from routines →',
+    bulkWeekly: 'All weekly →',
+    bulkOverdue: 'All overdue yearly →',
+    bulkDay: 'Whole day →',
+    emptyDay: 'Empty – the heading will be removed.',
+    weeklyGroup: 'Weekly routine: {n} – deleted by default ',
+    overdueHeading: 'Not done from the yearly routine (earlier months)',
+    later: 'Later',
+    apply: 'Apply',
+
+    headFiles: 'Files',
+    headBehaviour: 'Behaviour',
+    setUiLanguage: 'Interface language',
+    setUiLanguageDesc: 'Language of commands, dialogs and notices. Settings change when you reopen this tab, command names after restarting Obsidian.',
+    optAuto: 'Automatic (same as Obsidian)',
+    setNoteLanguage: 'Note language',
+    setNoteLanguageDesc: 'Language of the headings the plugin writes (weekdays, months, {undated}, {dayOff}). Routine and holiday files may use either language.',
+    setDailyPath: 'Daily plan file',
+    setWeeklyPath: 'Weekly routine',
+    setMonthlyPath: 'Monthly routine',
+    setYearlyPath: 'Yearly routine',
+    setHolidaysPath: 'Holidays (optional)',
+    setWorkTag: 'Tag skipped on days off',
+    setWorkTagDesc: 'Weekly routine lines with this tag are left out of days marked "- {dayOff}". Empty = do not skip.',
+    setTradingSundays: 'Shopping Sundays',
+    setTradingSundaysDesc: 'Adds "- {shopping}" to the heading of shopping Sundays (Poland).',
+    setAutoGenerate: 'Fill in automatically',
+    setAutoGenerateDesc: 'When Obsidian opens, fills in the current month and adds yearly routines until the end of the year.',
+    setSpreadDays: '"{spread}" – number of days',
+    setSpreadDaysDesc: 'Tasks with this option go to today and the following days in turn (1–31).',
+    setWeekAlert: 'Reminder about holidays this week',
+    setWeekAlertDesc: 'At start-up, shows holidays, days off and shopping Sundays from today to Sunday.',
+    setAutoReview: 'Review past days at start-up',
+    setAutoReviewDesc: 'Turn off if you prefer to open it with a command or a hotkey.',
+  },
+};
+const UI_LANG_SETTINGS = ['auto', ...Object.keys(UI)];
+
+// Interface language from the setting ('auto', 'pl', 'en') and the language
+// Obsidian runs in.
+function resolveUiLang(setting, appLang) {
+  if (UI[setting]) return setting;
+  return UI[appLang] ? appLang : 'en';
+}
+
+function uiText(lang, key, vars) {
+  const dict = UI[lang] || UI.en;
+  const s = Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : UI.en[key] || key;
+  return vars ? s.replace(/\{(\w+)\}/g, (all, k) => (k in vars ? String(vars[k]) : all)) : s;
+}
+
+// Month and weekday names as the interface writes them inside a sentence:
+// Polish in lower case ("listopad"), English capitalised ("November").
+const capitalise = (s) => s.charAt(0) + s.slice(1).toLowerCase();
+function uiMonth(lang, m) {
+  const name = langOf(lang).months[m - 1];
+  return lang === 'pl' ? name.toLowerCase() : capitalise(name);
+}
+function uiWeekday(lang, wd) {
+  return capitalise(langOf(lang).weekdays[wd]);
+}
+// "Czwartek 26.11" / "Thursday, Nov 26" (+ " (dziś)" / " (today)").
+function uiDayHead(lang, t, when) {
+  const head = uiText(lang, 'dayHead', {
+    weekday: uiWeekday(lang, weekdayOf(t.y, t.m, t.d)),
+    dd: pad2(t.d), mm: pad2(t.m), d: t.d, mon: uiMonth(lang, t.m).slice(0, 3),
+  });
+  return when ? `${head} (${uiText(lang, when === 'today' ? 'whenToday' : 'whenTomorrow')})` : head;
+}
+
 // Settings input -> stored value (null when not acceptable).
 function cleanSetting(item, value) {
   if (item.type === 'toggle') return !!value;
@@ -1278,7 +1557,8 @@ function cleanSetting(item, value) {
 }
 
 const core = {
-  LANGS, MONTHS, WEEKDAYS, UNDATED, ACTIONS, labelText,
+  LANGS, ACTIONS, labelText,
+  UI, UI_LANG_SETTINGS, resolveUiLang, uiText, uiMonth, uiWeekday, uiDayHead,
   pad2, monthKey, addDays, toIso, parseIso, resolveYear,
   parseWeekly, parseMonthly, parseYearly, parseHolidays, parseSources,
   easterOf, adventOf, tradingSundays, computeCalendar, migrateFilledHolidays, stripWorkOnDaysOff, setLineChecked, uncheckAll,
@@ -1302,6 +1582,7 @@ if (obsidian) {
   const appLanguage = () => (typeof obsidian.getLanguage === 'function' ? obsidian.getLanguage() : 'en');
 
   const DEFAULT_SETTINGS = {
+    uiLanguage: 'auto',
     noteLanguage: 'en',
     dailyPath: 'TODO DAILY.md',
     weeklyPath: 'RUTYNY/RUTYNA TYGODNIOWA.md',
@@ -1321,8 +1602,29 @@ if (obsidian) {
   const notify = (msg) => new Notice(`Plain Planner: ${msg}`);
 
   class PlainPlannerPlugin extends Plugin {
+    // Interface language and text lookup.
+    ui() {
+      return resolveUiLang(this.settings.uiLanguage, appLanguage());
+    }
+    t(key, vars) {
+      return uiText(this.ui(), key, vars);
+    }
+    say(key, vars) {
+      notify(this.t(key, vars));
+    }
+    // Note keywords shown inside interface texts ("BEZ DATY", "WOLNE", ...).
+    noteWords() {
+      const l = langOf(this.settings.noteLanguage);
+      return { undated: l.undated, dayOff: l.labels.WOLNE, shopping: l.labels.HANDLOWA };
+    }
+    dailyName() {
+      const f = this.file(this.settings.dailyPath);
+      return f ? f.basename : this.settings.dailyPath.replace(/\.md$/, '');
+    }
+
     async onload() {
       await this.loadState();
+      const t = (key) => this.t(key, this.noteWords());
       this.cache = new Map();
       this.lastRunDay = null;
       this.busy = false;
@@ -1332,22 +1634,22 @@ if (obsidian) {
 
       this.addCommand({
         id: 'generate-month',
-        name: 'Rozpisz miesiąc',
+        name: t('cmdGenerateMonth'),
         callback: () => new MonthPickModal(this.app, this).open(),
       });
       this.addCommand({
         id: 'yearly-rest',
-        name: 'Dodaj rutyny roczne do końca roku',
+        name: t('cmdYearlyRest'),
         callback: () => this.runYearlyRest(true),
       });
       this.addCommand({
         id: 'review',
-        name: 'Przegląd zaległych dni',
+        name: t('cmdReview'),
         callback: () => this.openReview(true),
       });
       this.addCommand({
         id: 'move-next-month',
-        name: 'Przenieś na następny miesiąc (BEZ DATY)',
+        name: t('cmdMoveNextMonth'),
         editorCheckCallback: (checking, editor, view) => {
           if (!this.isDailyView(view)) return false;
           if (!checking) this.moveSelectionToNextMonth(editor);
@@ -1358,31 +1660,31 @@ if (obsidian) {
       this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, view) => {
         if (!this.isDailyView(view)) return;
         menu.addItem((item) => item
-          .setTitle('Przenieś na następny miesiąc (BEZ DATY)')
+          .setTitle(t('cmdMoveNextMonth'))
           .setIcon('calendar-plus')
           .onClick(() => this.moveSelectionToNextMonth(editor)));
       }));
       this.addCommand({
         id: 'week-alert',
-        name: 'Pokaż święta w tym tygodniu',
+        name: t('cmdWeekAlert'),
         callback: () => this.showWeekAlert(todayNow(), true),
       });
       this.addCommand({
         id: 'run-now',
-        name: 'Uruchom teraz (jak przy starcie Obsidiana)',
+        name: t('cmdRunNow'),
         callback: async () => {
-          await this.withUndo('Uruchom teraz', () => this.dailyRun(false));
+          await this.withUndo(this.t('undoRunNow'), () => this.dailyRun(false));
           await this.openReview(true);
         },
       });
       this.addCommand({
         id: 'undo-last',
-        name: 'Cofnij ostatnie rozpisanie',
+        name: t('cmdUndoLast'),
         callback: () => this.undoLast(),
       });
       this.addCommand({
         id: 'forget-filled',
-        name: 'Zapomnij rozpisane dni (rozpisz od nowa)',
+        name: t('cmdForget'),
         callback: async () => {
           this.state.filledDays = new Set();
           this.state.filledYearly = new Set();
@@ -1390,18 +1692,18 @@ if (obsidian) {
           this.state.labeledDays = new Set();
           this.state.strippedDays = new Set();
           await this.saveState();
-          notify('wtyczka zapomniała, które dni rozpisała.');
+          this.say('forgotDays');
         },
       });
 
       this.app.workspace.onLayoutReady(async () => {
         await this.refreshCache();
         this.registerEvent(this.app.vault.on('modify', (f) => this.onModify(f)));
-        await this.withUndo('start Obsidiana', () => this.dailyRun(true));
+        await this.withUndo(this.t('undoStartup'), () => this.dailyRun(true));
       });
       // Obsidian left open overnight: run again once the date changes.
       this.registerInterval(window.setInterval(() => {
-        if (toIso(todayNow()) !== this.lastRunDay) this.withUndo('nowy dzień', () => this.dailyRun(true));
+        if (toIso(todayNow()) !== this.lastRunDay) this.withUndo(this.t('undoNewDay'), () => this.dailyRun(true));
       }, 10 * 60 * 1000));
     }
 
@@ -1478,7 +1780,7 @@ if (obsidian) {
       const read = async (p, optional) => {
         const f = this.file(p);
         if (!f) {
-          if (!optional) notify(`nie znaleziono pliku ${p}`);
+          if (!optional) this.say('fileNotFound', { path: p });
           return '';
         }
         return this.app.vault.read(f);
@@ -1517,7 +1819,7 @@ if (obsidian) {
     async editDaily(fn) {
       const f = this.file(this.settings.dailyPath);
       if (!f) {
-        notify(`nie znaleziono pliku ${this.settings.dailyPath}`);
+        this.say('fileNotFound', { path: this.settings.dailyPath });
         return null;
       }
       const today = todayNow();
@@ -1545,7 +1847,7 @@ if (obsidian) {
         }
         restoreMarks(this.state, marks);
       }
-      notify('plik zmieniał się w trakcie zapisu, nic nie zmieniono. Spróbuj ponownie.');
+      this.say('writeConflict');
       return null;
     }
 
@@ -1572,23 +1874,23 @@ if (obsidian) {
     async undoLast() {
       const u = this.state.undo;
       if (!u) {
-        notify('nie ma czego cofać.');
+        this.say('nothingToUndo');
         return;
       }
       const f = this.file(this.settings.dailyPath);
       if (!f) {
-        notify(`nie znaleziono pliku ${this.settings.dailyPath}`);
+        this.say('fileNotFound', { path: this.settings.dailyPath });
         return;
       }
       const current = await this.app.vault.read(f);
-      const ok = await new Promise((resolve) => new UndoConfirmModal(this.app, u, current !== u.after, resolve).open());
+      const ok = await new Promise((resolve) => new UndoConfirmModal(this, u, current !== u.after, resolve).open());
       if (!ok) return;
       await this.backup(current);
       await this.app.vault.process(f, () => u.before);
       restoreMarks(this.state, u.marks);
       this.state.undo = null;
       await this.saveState();
-      notify(`cofnięto „${u.label}”. Możesz rozpisać jeszcze raz.`);
+      this.say('undone', { label: u.label });
     }
 
     // --- daily run ----------------------------------------------------------
@@ -1620,16 +1922,16 @@ if (obsidian) {
     // New month: untick the monthly routine. New year: untick the yearly one.
     // Holidays, days off and shopping Sundays from today to Sunday. Shown at
     // start-up before anything else; "OK" silences it for the rest of the week
-    // (until the entries change), "Przypomnij jutro" until tomorrow.
+    // (until the entries change), "Remind me tomorrow" until tomorrow.
     async showWeekAlert(today, force) {
       const src = await this.readSources();
       const days = weekAhead(src, today);
       if (!days.length) {
-        if (force) notify('w tym tygodniu nie ma świąt ani niedziel handlowych.');
+        if (force) this.say('noHolidaysThisWeek');
         return;
       }
       if (!force && !shouldShowWeekAlert(days, this.state.weekAlert, today)) return;
-      const choice = await new Promise((resolve) => new WeekAlertModal(this.app, days, today, resolve).open());
+      const choice = await new Promise((resolve) => new WeekAlertModal(this, days, today, resolve).open());
       const base = { week: toIso(weekStart(today)), sig: weekSignature(days) };
       if (choice === 'ok') this.state.weekAlert = Object.assign(base, { ok: true, snoozeUntil: null });
       else if (choice === 'tomorrow') this.state.weekAlert = Object.assign(base, { ok: false, snoozeUntil: toIso(addDays(today, 1)) });
@@ -1646,7 +1948,7 @@ if (obsidian) {
       const snapM = this.state.monthlySnapshot || monthlySnapshot(src.monthly);
       const ch = routinesChanged(src, snapW, snapM);
       if (ch.weekly || ch.monthly) {
-        const choice = await new Promise((resolve) => new RoutineChangeModal(this.app, ch, resolve).open());
+        const choice = await new Promise((resolve) => new RoutineChangeModal(this, ch, resolve).open());
         if (choice === 'today' || choice === 'tomorrow') {
           const start = choice === 'today' ? today : addDays(today, 1);
           const res = await this.editDaily((model) => {
@@ -1655,7 +1957,7 @@ if (obsidian) {
             if (ch.monthly) n += applyMonthlyChange(model, src, snapM, this.state, start, today);
             return { n, changed: n > 0 };
           });
-          if (res) notify(`zmiany rutyny zastosowane (zmienione miejsca: ${res.n}).`);
+          if (res) this.say('routineChangesApplied', { n: res.n });
         }
       }
       this.state.weeklySnapshot = weeklySnapshot(src.weekly);
@@ -1675,7 +1977,7 @@ if (obsidian) {
         if (f) await this.app.vault.process(f, uncheckAll);
         this.state.lastMonthly = mk;
         changed = true;
-        notify('nowy miesiąc – rutyna miesięczna odznaczona.');
+        this.say('newMonthUnchecked');
       }
       if (!this.state.lastYearly) {
         this.state.lastYearly = yk;
@@ -1686,13 +1988,13 @@ if (obsidian) {
         this.state.lastYearly = yk;
         this.state.skippedYearly = new Set();
         changed = true;
-        notify('nowy rok – rutyna roczna odznaczona.');
+        this.say('newYearUnchecked');
       }
       if (changed) await this.saveState();
     }
 
     async runGenerate(y, m, verbose) {
-      return this.withUndo(`Rozpisz miesiąc (${MONTHS[m - 1].toLowerCase()})`, () => this.doGenerate(y, m, verbose));
+      return this.withUndo(this.t('undoGenerateMonth', { month: uiMonth(this.ui(), m) }), () => this.doGenerate(y, m, verbose));
     }
 
     async doGenerate(y, m, verbose) {
@@ -1703,12 +2005,13 @@ if (obsidian) {
       });
       await this.saveState();
       if (!res) return;
-      if (res.changed) notify(`${MONTHS[m - 1]} – nowe dni: ${res.days}, dodane zadania: ${res.added}.`);
-      else if (verbose) notify(`${MONTHS[m - 1]} jest już rozpisany, nic nie dodano.`);
+      const month = uiMonth(this.ui(), m);
+      if (res.changed) this.say('monthFilled', { month, days: res.days, added: res.added });
+      else if (verbose) this.say('monthAlreadyFilled', { month });
     }
 
     async runYearlyRest(verbose) {
-      return this.withUndo('Dodaj rutyny roczne do końca roku', () => this.doYearlyRest(verbose));
+      return this.withUndo(this.t('undoYearlyRest'), () => this.doYearlyRest(verbose));
     }
 
     async doYearlyRest(verbose) {
@@ -1719,8 +2022,8 @@ if (obsidian) {
       });
       await this.saveState();
       if (!res) return;
-      if (res.changed) notify(`dodano ${res.added} zadań rocznych do kolejnych miesięcy.`);
-      else if (verbose) notify('rutyny roczne do końca roku są już rozpisane.');
+      if (res.changed) this.say('yearlyAdded', { n: res.added });
+      else if (verbose) this.say('yearlyAlreadyFilled');
     }
 
     // --- review -------------------------------------------------------------
@@ -1732,7 +2035,7 @@ if (obsidian) {
       const today = todayNow();
       const review = collectReview(parseDaily(await this.app.vault.read(f), today, this.settings.noteLanguage), src, today, this.state);
       if (!reviewNeeded(review)) {
-        if (verbose) notify('brak zaległych dni.');
+        if (verbose) this.say('noOverdue');
         return;
       }
       new ReviewModal(this.app, this, review).open();
@@ -1750,17 +2053,19 @@ if (obsidian) {
       const before = editor.getValue();
       const res = moveLinesToNextMonth(before, from, to, todayNow(), this.settings.noteLanguage);
       if (!res) {
-        notify('zaznacz linię z zadaniem (nie nagłówek).');
+        this.say('selectTaskLine');
         return;
       }
       await this.backup(before);
       editor.setValue(res.text);
       editor.setCursor({ line: Math.min(from, editor.lineCount() - 1), ch: 0 });
-      notify(`przeniesiono ${res.count} → ${MONTHS[res.target.m - 1]} ${res.target.y}, BEZ DATY.`);
+      this.say('movedToNextMonth', {
+        n: res.count, month: uiMonth(this.ui(), res.target.m), year: res.target.y, undated: this.noteWords().undated,
+      });
     }
 
     async applyReviewDecisions(decisions) {
-      return this.withUndo('Przegląd zaległych dni', () => this.doApplyReview(decisions));
+      return this.withUndo(this.t('undoReview'), () => this.doApplyReview(decisions));
     }
 
     async doApplyReview(decisions) {
@@ -1774,7 +2079,7 @@ if (obsidian) {
       if (!res) return;
       for (const k of res.skipped) this.state.skippedYearly.add(k);
       await this.saveState();
-      notify(`przeniesione ${res.moved}, usunięte ${res.deleted}, zamknięte dni ${res.removedBlocks}.`);
+      this.say('reviewApplied', { moved: res.moved, deleted: res.deleted, closed: res.removedBlocks });
     }
 
     // --- sync ---------------------------------------------------------------
@@ -1798,12 +2103,13 @@ if (obsidian) {
     }
   }
 
-  const LABEL_TEXT = { WOLNE: 'dzień wolny', HANDLOWA: 'niedziela handlowa' };
-  const capital = (s) => s.charAt(0) + s.slice(1).toLowerCase();
+  const LABEL_KEY = { WOLNE: 'labelDayOff', HANDLOWA: 'labelShoppingSunday' };
 
+  // Dialogs get the plugin for its texts (plugin.t) and its app.
   class WeekAlertModal extends Modal {
-    constructor(app, days, today, resolve) {
-      super(app);
+    constructor(plugin, days, today, resolve) {
+      super(plugin.app);
+      this.plugin = plugin;
       this.days = days;
       this.today = today;
       this.resolve = resolve;
@@ -1812,17 +2118,18 @@ if (obsidian) {
     onOpen() {
       const { contentEl } = this;
       contentEl.addClass('plain-planner-week');
-      contentEl.createEl('h3', { text: 'W tym tygodniu' });
+      const t = (key, vars) => this.plugin.t(key, vars);
+      const lang = this.plugin.ui();
+      contentEl.createEl('h3', { text: t('weekTitle') });
       const list = contentEl.createEl('ul', { cls: 'plain-planner-week-list' });
       const todayIso = toIso(this.today);
       const tomorrowIso = toIso(addDays(this.today, 1));
       for (const d of this.days) {
         const li = list.createEl('li');
-        const when = d.iso === todayIso ? 'dziś' : d.iso === tomorrowIso ? 'jutro' : null;
-        const head = `${capital(WEEKDAYS[weekdayOf(d.t.y, d.t.m, d.t.d)])} ${pad2(d.t.d)}.${pad2(d.t.m)}${when ? ` (${when})` : ''}`;
-        li.createEl('strong', { text: head });
-        const parts = d.events.map((e) => (e.task ? `do zrobienia: ${e.text}` : e.text));
-        for (const l of d.label.split(' - ').filter(Boolean)) parts.push(LABEL_TEXT[l] || l.toLowerCase());
+        const when = d.iso === todayIso ? 'today' : d.iso === tomorrowIso ? 'tomorrow' : null;
+        li.createEl('strong', { text: uiDayHead(lang, d.t, when) });
+        const parts = d.events.map((e) => (e.task ? t('toDo', { text: e.text }) : e.text));
+        for (const l of d.label.split(' - ').filter(Boolean)) parts.push(LABEL_KEY[l] ? t(LABEL_KEY[l]) : l.toLowerCase());
         li.appendText(` – ${parts.join(' · ')}`);
       }
       const buttons = contentEl.createDiv({ cls: 'plain-planner-buttons' });
@@ -1833,8 +2140,8 @@ if (obsidian) {
           this.close();
         });
       };
-      add('Przypomnij mi jutro', 'tomorrow');
-      add('OK', 'ok', true);
+      add(t('remindTomorrow'), 'tomorrow');
+      add(t('ok'), 'ok', true);
     }
     onClose() {
       this.contentEl.empty();
@@ -1843,8 +2150,9 @@ if (obsidian) {
   }
 
   class UndoConfirmModal extends Modal {
-    constructor(app, undo, editedSince, resolve) {
-      super(app);
+    constructor(plugin, undo, editedSince, resolve) {
+      super(plugin.app);
+      this.plugin = plugin;
       this.undo = undo;
       this.editedSince = editedSince;
       this.resolve = resolve;
@@ -1852,21 +2160,22 @@ if (obsidian) {
     }
     onOpen() {
       const { contentEl } = this;
+      const t = (key, vars) => this.plugin.t(key, vars);
       const at = new Date(this.undo.at);
-      const when = `${pad2(at.getDate())}.${pad2(at.getMonth() + 1)} ${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
-      contentEl.createEl('h3', { text: 'Cofnąć ostatnie rozpisanie?' });
-      contentEl.createEl('p', {
-        text: `Ostatnia zmiana wtyczki: „${this.undo.label}” (${when}). TODO DAILY wróci do stanu sprzed niej, a wtyczka zapomni dni, które wtedy rozpisała, więc będzie można rozpisać je jeszcze raz.`,
+      const when = t('dateTime', {
+        dd: pad2(at.getDate()), mm: pad2(at.getMonth() + 1), d: at.getDate(),
+        mon: uiMonth(this.plugin.ui(), at.getMonth() + 1).slice(0, 3),
+        hh: pad2(at.getHours()), min: pad2(at.getMinutes()),
       });
+      const file = this.plugin.dailyName();
+      contentEl.createEl('h3', { text: t('undoTitle') });
+      contentEl.createEl('p', { text: t('undoBody', { label: this.undo.label, when, file }) });
       if (this.editedSince) {
-        contentEl.createEl('p', {
-          cls: 'plain-planner-warn',
-          text: 'Uwaga: TODO DAILY zmienił się od tamtej pory (Twoje wpisy, odhaczenia albo Ctrl+Z). Te późniejsze zmiany też zostaną cofnięte. Obecny plik trafi do kopii w folderze backups wtyczki.',
-        });
+        contentEl.createEl('p', { cls: 'plain-planner-warn', text: t('undoWarning', { file }) });
       }
       const buttons = contentEl.createDiv({ cls: 'plain-planner-buttons' });
-      buttons.createEl('button', { text: 'Anuluj' }).addEventListener('click', () => this.close());
-      const ok = buttons.createEl('button', { text: 'Cofnij', cls: this.editedSince ? 'mod-warning' : 'mod-cta' });
+      buttons.createEl('button', { text: t('cancel') }).addEventListener('click', () => this.close());
+      const ok = buttons.createEl('button', { text: t('undo'), cls: this.editedSince ? 'mod-warning' : 'mod-cta' });
       ok.addEventListener('click', () => {
         this.ok = true;
         this.close();
@@ -1879,19 +2188,19 @@ if (obsidian) {
   }
 
   class RoutineChangeModal extends Modal {
-    constructor(app, changes, resolve) {
-      super(app);
+    constructor(plugin, changes, resolve) {
+      super(plugin.app);
+      this.plugin = plugin;
       this.changes = changes;
       this.resolve = resolve;
       this.choice = 'no';
     }
     onOpen() {
       const { contentEl } = this;
-      const which = [this.changes.weekly && 'tygodniowa', this.changes.monthly && 'miesięczna'].filter(Boolean).join(' i ');
-      contentEl.createEl('h3', { text: `Zmieniła się rutyna ${which}` });
-      contentEl.createEl('p', {
-        text: 'Zastosować zmiany w dniach, które są już rozpisane? Twoje wpisy zostaną nietknięte, a usunięte (zrobione) zadania nie wrócą.',
-      });
+      const t = (key) => this.plugin.t(key);
+      const { weekly, monthly } = this.changes;
+      contentEl.createEl('h3', { text: t(weekly && monthly ? 'routineChangedBoth' : weekly ? 'routineChangedWeekly' : 'routineChangedMonthly') });
+      contentEl.createEl('p', { text: t('routineChangeBody') });
       const buttons = contentEl.createDiv({ cls: 'plain-planner-buttons' });
       const add = (text, choice, cta) => {
         const b = buttons.createEl('button', { text, cls: cta ? 'mod-cta' : '' });
@@ -1900,9 +2209,9 @@ if (obsidian) {
           this.close();
         });
       };
-      add('Nie', 'no');
-      add('Od jutra', 'tomorrow');
-      add('Od dziś', 'today', true);
+      add(t('no'), 'no');
+      add(t('fromTomorrow'), 'tomorrow');
+      add(t('fromToday'), 'today', true);
     }
     onClose() {
       this.contentEl.empty();
@@ -1914,17 +2223,17 @@ if (obsidian) {
     constructor(app, plugin) {
       super(app);
       this.plugin = plugin;
-      this.setPlaceholder('Który miesiąc rozpisać?');
+      this.setPlaceholder(plugin.t('monthPickPlaceholder'));
     }
     getSuggestions(query) {
       const t = todayNow();
       const list = [];
       for (let i = 0; i < 13; i++) {
         const x = fromDate(new Date(t.y, t.m - 1 + i, 1));
-        list.push({ y: x.y, m: x.m, label: `${MONTHS[x.m - 1]} ${x.y}` });
+        list.push({ y: x.y, m: x.m, label: `${capitalise(uiMonth(this.plugin.ui(), x.m))} ${x.y}` });
       }
-      const q = query.trim().toUpperCase();
-      return list.filter((it) => it.label.includes(q));
+      const q = query.trim().toLowerCase();
+      return list.filter((it) => it.label.toLowerCase().includes(q));
     }
     renderSuggestion(it, el) {
       el.setText(it.label);
@@ -1934,7 +2243,11 @@ if (obsidian) {
     }
   }
 
-  const TYPE_LABEL = { done: 'zrobione', routine: 'rutyna', holiday: 'święto', weekly: 'tygodniowa', own: 'własne' };
+  const TYPE_KEY = { done: 'typeDone', routine: 'typeRoutine', holiday: 'typeHoliday', weekly: 'typeWeekly', own: 'typeOwn' };
+  const ACTION_KEY = {
+    today: 'actionToday', tomorrow: 'actionTomorrow', date: 'actionDate', spread: 'actionSpread',
+    nextMonth: 'actionNextMonth', delete: 'actionDelete', keep: 'actionKeep', later: 'actionLater', skip: 'actionSkip',
+  };
 
   // Review of past days, built for long lists too: summary + bulk controls on
   // top, one collapsible group of weekly lines per day, a scrolling list and
@@ -1949,14 +2262,18 @@ if (obsidian) {
       this.bulks = []; // { sel, pick, placeholder }
     }
 
-    // Each bulk dropdown shows the action its rows share, or "— różne —"
+    t(key, vars) {
+      return this.plugin.t(key, vars);
+    }
+
+    // Each bulk dropdown shows the action its rows share, or "— mixed —"
     // once they differ (a custom date counts as different).
     refreshBulks() {
       for (const b of this.bulks) {
         const values = new Set(this.controls.filter(b.pick).map((c) => c.get()));
         const [only] = values;
         const shared = values.size === 1 && [...b.sel.options].some((o) => o.value && o.value === only);
-        b.placeholder.text = shared ? '— ustaw —' : '— różne —';
+        b.placeholder.text = this.t(shared ? 'bulkSet' : 'bulkMixed');
         b.sel.value = shared ? only : '';
       }
     }
@@ -1988,11 +2305,11 @@ if (obsidian) {
 
     row(parent, item, options, def, blockId) {
       const row = parent.createDiv({ cls: 'plain-planner-row' });
-      row.createSpan({ cls: `plain-planner-tag plain-planner-tag-${item.type || 'routine'}`, text: TYPE_LABEL[item.type] || 'roczna' });
+      row.createSpan({ cls: `plain-planner-tag plain-planner-tag-${item.type || 'routine'}`, text: this.t(TYPE_KEY[item.type] || 'typeYearly') });
       row.createSpan({ cls: 'plain-planner-text', text: item.text });
       const controls = row.createDiv({ cls: 'plain-planner-controls' });
       if (item.type === 'done') {
-        controls.createSpan({ cls: 'plain-planner-note', text: 'zostanie usunięte' });
+        controls.createSpan({ cls: 'plain-planner-note', text: this.t('willBeDeleted') });
         return;
       }
       const { get, set } = this.actionSelect(controls, item, options, def);
@@ -2004,7 +2321,7 @@ if (obsidian) {
       const wrap = parent.createDiv({ cls: 'plain-planner-bulk' });
       wrap.createSpan({ text: label });
       const sel = wrap.createEl('select', { cls: 'dropdown' });
-      const placeholder = sel.createEl('option', { value: '', text: '— ustaw —' });
+      const placeholder = sel.createEl('option', { value: '', text: this.t('bulkSet') });
       for (const [value, text] of options) if (value !== 'date') sel.createEl('option', { value, text });
       sel.addEventListener('change', () => {
         if (!sel.value) return;
@@ -2020,68 +2337,62 @@ if (obsidian) {
     onOpen() {
       const { contentEl } = this;
       contentEl.addClass('plain-planner-review');
-      contentEl.createEl('h2', { text: 'Przegląd zaległych dni' });
-      const dayOptions = Object.entries(ACTIONS);
-      const overdueOptions = [
-        ['later', 'Nie teraz'],
-        ['today', ACTIONS.today],
-        ['tomorrow', ACTIONS.tomorrow],
-        ['date', ACTIONS.date],
-        ['spread', ACTIONS.spread],
-        ['nextMonth', ACTIONS.nextMonth],
-        ['skip', 'Pomiń w tym roku'],
-      ];
+      contentEl.createEl('h2', { text: this.t('reviewTitle') });
+      const words = this.plugin.noteWords();
+      const options = (keys) => keys.map((k) => [k, this.t(ACTION_KEY[k], words)]);
+      const dayOptions = options(ACTIONS);
+      const overdueOptions = options(['later', 'today', 'tomorrow', 'date', 'spread', 'nextMonth', 'skip']);
 
       const count = { own: 0, weekly: 0, routine: 0, holiday: 0, done: 0 };
       for (const b of this.review.blocks) for (const it of b.items) count[it.type]++;
-      const parts = [`dni: ${this.review.blocks.length}`];
-      if (count.own) parts.push(`własne: ${count.own}`);
-      if (count.routine) parts.push(`z rutyn: ${count.routine}`);
-      if (count.weekly) parts.push(`tygodniowe: ${count.weekly}`);
-      if (count.holiday) parts.push(`święta: ${count.holiday}`);
-      if (count.done) parts.push(`zrobione: ${count.done}`);
-      if (this.review.overdue.length) parts.push(`zaległe roczne: ${this.review.overdue.length}`);
+      const parts = [this.t('sumDays', { n: this.review.blocks.length })];
+      if (count.own) parts.push(this.t('sumOwn', { n: count.own }));
+      if (count.routine) parts.push(this.t('sumRoutine', { n: count.routine }));
+      if (count.weekly) parts.push(this.t('sumWeekly', { n: count.weekly }));
+      if (count.holiday) parts.push(this.t('sumHoliday', { n: count.holiday }));
+      if (count.done) parts.push(this.t('sumDone', { n: count.done }));
+      if (this.review.overdue.length) parts.push(this.t('sumOverdue', { n: this.review.overdue.length }));
       contentEl.createEl('p', { cls: 'plain-planner-summary', text: parts.join(' · ') });
 
       const bulkBox = contentEl.createDiv({ cls: 'plain-planner-bulkbox' });
       const list = contentEl.createDiv({ cls: 'plain-planner-scroll' });
 
-      if (count.own) this.bulk(bulkBox, 'Wszystkie własne →', dayOptions, (c) => c.type === 'own');
-      if (count.routine) this.bulk(bulkBox, 'Wszystkie z rutyn →', dayOptions, (c) => c.type === 'routine');
-      if (count.weekly) this.bulk(bulkBox, 'Wszystkie tygodniowe →', dayOptions, (c) => c.type === 'weekly');
-      if (this.review.overdue.length) this.bulk(bulkBox, 'Wszystkie zaległe roczne →', overdueOptions, (c) => c.type === 'overdue');
+      if (count.own) this.bulk(bulkBox, this.t('bulkOwn'), dayOptions, (c) => c.type === 'own');
+      if (count.routine) this.bulk(bulkBox, this.t('bulkRoutine'), dayOptions, (c) => c.type === 'routine');
+      if (count.weekly) this.bulk(bulkBox, this.t('bulkWeekly'), dayOptions, (c) => c.type === 'weekly');
+      if (this.review.overdue.length) this.bulk(bulkBox, this.t('bulkOverdue'), overdueOptions, (c) => c.type === 'overdue');
 
       for (const b of this.review.blocks) {
         const head = list.createDiv({ cls: 'plain-planner-dayhead' });
         head.createEl('h4', { text: b.label });
         if (!b.items.length) {
-          list.createEl('p', { cls: 'plain-planner-note', text: 'Pusty – nagłówek zostanie usunięty.' });
+          list.createEl('p', { cls: 'plain-planner-note', text: this.t('emptyDay') });
           continue;
         }
         if (b.items.some((it) => it.type !== 'done')) {
-          this.bulk(head, 'Cały dzień →', dayOptions, (c) => c.blockId === b.id && c.type !== 'overdue');
+          this.bulk(head, this.t('bulkDay'), dayOptions, (c) => c.blockId === b.id && c.type !== 'overdue');
         }
         const weekly = b.items.filter((it) => it.type === 'weekly');
         for (const it of b.items) if (it.type !== 'weekly') this.row(list, it, dayOptions, it.default, b.id);
         if (weekly.length) {
           const det = list.createEl('details', { cls: 'plain-planner-weekly' });
           const sum = det.createEl('summary');
-          sum.createSpan({ text: `Rutyna tygodniowa: ${weekly.length} – domyślnie usuń ` });
+          sum.createSpan({ text: this.t('weeklyGroup', { n: weekly.length }) });
           this.bulk(sum, '', dayOptions, (c) => c.blockId === b.id && c.type === 'weekly');
           for (const it of weekly) this.row(det, it, dayOptions, it.default, b.id);
         }
       }
       if (this.review.overdue.length) {
-        list.createDiv({ cls: 'plain-planner-dayhead' }).createEl('h4', { text: 'Niezrobione z rutyny rocznej (wcześniejsze miesiące)' });
+        list.createDiv({ cls: 'plain-planner-dayhead' }).createEl('h4', { text: this.t('overdueHeading') });
         for (const o of this.review.overdue) {
-          this.row(list, { id: o.id, type: null, text: `${o.text} (${MONTHS[o.month - 1].toLowerCase()})` }, overdueOptions, 'later', 'overdue');
+          this.row(list, { id: o.id, type: null, text: `${o.text} (${uiMonth(this.plugin.ui(), o.month)})` }, overdueOptions, 'later', 'overdue');
         }
       }
       this.refreshBulks();
 
       const buttons = contentEl.createDiv({ cls: 'plain-planner-buttons' });
-      buttons.createEl('button', { text: 'Później' }).addEventListener('click', () => this.close());
-      const apply = buttons.createEl('button', { text: 'Zastosuj', cls: 'mod-cta' });
+      buttons.createEl('button', { text: this.t('later') }).addEventListener('click', () => this.close());
+      const apply = buttons.createEl('button', { text: this.t('apply'), cls: 'mod-cta' });
       apply.addEventListener('click', async () => {
         apply.disabled = true;
         await this.plugin.applyReviewDecisions(this.decisions);
@@ -2096,54 +2407,42 @@ if (obsidian) {
 
   // One description of the settings, rendered two ways: declaratively on
   // Obsidian 1.13+ (shows up in the settings search) and with the classic
-  // Setting API on older versions.
-  const SETTING_GROUPS = [
-    {
-      heading: 'Pliki',
-      items: [
-        {
-          key: 'noteLanguage', type: 'dropdown', name: 'Język notatek',
-          options: { pl: 'Polski', en: 'English' },
-          desc: 'Język nagłówków, które wtyczka dopisuje (dni tygodnia, miesiące, BEZ DATY, WOLNE). Pliki rutyn i świąt mogą być w obu językach.',
-        },
-        { key: 'dailyPath', type: 'file', name: 'Plik TODO DAILY' },
-        { key: 'weeklyPath', type: 'file', name: 'Rutyna tygodniowa' },
-        { key: 'monthlyPath', type: 'file', name: 'Rutyna miesięczna' },
-        { key: 'yearlyPath', type: 'file', name: 'Rutyna roczna' },
-        { key: 'holidaysPath', type: 'file', name: 'Święta (opcjonalny)' },
-      ],
-    },
-    {
-      heading: 'Działanie',
-      items: [
-        {
-          key: 'workTag', type: 'text', name: 'Tag pomijany w dni wolne', placeholder: '#praca',
-          desc: 'Linie rutyny tygodniowej z tym tagiem nie trafiają do dni oznaczonych „- WOLNE”. Puste = nie pomijaj.',
-        },
-        {
-          key: 'tradingSundays', type: 'toggle', name: 'Niedziele handlowe',
-          desc: 'Dopisuje „- HANDLOWA” w nagłówku niedziel handlowych.',
-        },
-        {
-          key: 'autoGenerate', type: 'toggle', name: 'Rozpisuj automatycznie',
-          desc: 'Po otwarciu Obsidiana rozpisuje bieżący miesiąc i dodaje rutyny roczne do końca roku.',
-        },
-        {
-          key: 'spreadDays', type: 'number', name: '„Rozłóż na najbliższe dni” – na ile dni', min: 1, max: 31,
-          desc: 'Zadania z tą opcją trafiają po kolei na dziś i kolejne dni (1–31).',
-        },
-        {
-          key: 'weekAlert', type: 'toggle', name: 'Przypomnienie o świętach w tym tygodniu',
-          desc: 'Przy starcie pokazuje święta, dni wolne i niedziele handlowe od dziś do niedzieli.',
-        },
-        {
-          key: 'autoReview', type: 'toggle', name: 'Przegląd zaległych dni przy starcie',
-          desc: 'Wyłącz, jeśli wolisz uruchamiać go komendą lub skrótem klawiszowym.',
-        },
-      ],
-    },
-  ];
-  const SETTING_ITEMS = SETTING_GROUPS.flatMap((g) => g.items);
+  // Setting API on older versions. Built on demand, in the interface language.
+  function settingGroups(plugin) {
+    const words = plugin.noteWords();
+    const t = (key) => plugin.t(key, Object.assign({ spread: plugin.t('actionSpread') }, words));
+    return [
+      {
+        heading: t('headFiles'),
+        items: [
+          {
+            key: 'uiLanguage', type: 'dropdown', name: t('setUiLanguage'), desc: t('setUiLanguageDesc'),
+            options: { auto: t('optAuto'), pl: 'Polski', en: 'English' },
+          },
+          {
+            key: 'noteLanguage', type: 'dropdown', name: t('setNoteLanguage'), desc: t('setNoteLanguageDesc'),
+            options: { pl: 'Polski', en: 'English' },
+          },
+          { key: 'dailyPath', type: 'file', name: t('setDailyPath') },
+          { key: 'weeklyPath', type: 'file', name: t('setWeeklyPath') },
+          { key: 'monthlyPath', type: 'file', name: t('setMonthlyPath') },
+          { key: 'yearlyPath', type: 'file', name: t('setYearlyPath') },
+          { key: 'holidaysPath', type: 'file', name: t('setHolidaysPath') },
+        ],
+      },
+      {
+        heading: t('headBehaviour'),
+        items: [
+          { key: 'workTag', type: 'text', name: t('setWorkTag'), desc: t('setWorkTagDesc'), placeholder: '#praca' },
+          { key: 'tradingSundays', type: 'toggle', name: t('setTradingSundays'), desc: t('setTradingSundaysDesc') },
+          { key: 'autoGenerate', type: 'toggle', name: t('setAutoGenerate'), desc: t('setAutoGenerateDesc') },
+          { key: 'spreadDays', type: 'number', name: t('setSpreadDays'), desc: t('setSpreadDaysDesc'), min: 1, max: 31 },
+          { key: 'weekAlert', type: 'toggle', name: t('setWeekAlert'), desc: t('setWeekAlertDesc') },
+          { key: 'autoReview', type: 'toggle', name: t('setAutoReview'), desc: t('setAutoReviewDesc') },
+        ],
+      },
+    ];
+  }
 
   class PlainPlannerSettingTab extends PluginSettingTab {
     constructor(app, plugin) {
@@ -2152,7 +2451,7 @@ if (obsidian) {
     }
 
     getSettingDefinitions() {
-      return SETTING_GROUPS.map((g) => ({
+      return settingGroups(this.plugin).map((g) => ({
         type: 'group',
         heading: g.heading,
         items: g.items.map((it) => {
@@ -2176,25 +2475,30 @@ if (obsidian) {
     // Overridden so a change is stored next to the plugin state; the default
     // would save the settings object alone and drop the rest of data.json.
     async setControlValue(key, value) {
-      const item = SETTING_ITEMS.find((it) => it.key === key);
+      const item = settingGroups(this.plugin).flatMap((g) => g.items).find((it) => it.key === key);
       if (!item) return;
       const v = cleanSetting(item, value);
       if (v === null) return;
       this.plugin.settings[key] = v;
       await this.plugin.saveState();
+      return v;
     }
 
     // Fallback for Obsidian older than 1.13.
     display() {
       const { containerEl } = this;
       containerEl.empty();
-      for (const g of SETTING_GROUPS) {
+      for (const g of settingGroups(this.plugin)) {
         new Setting(containerEl).setName(g.heading).setHeading();
         for (const it of g.items) {
           const s = new Setting(containerEl).setName(it.name);
           if (it.desc) s.setDesc(it.desc);
           const value = this.getControlValue(it.key);
-          const save = (v) => this.setControlValue(it.key, v);
+          // Language changes redraw the tab so its texts follow at once.
+          const save = async (v) => {
+            const stored = await this.setControlValue(it.key, v);
+            if (stored !== undefined && (it.key === 'uiLanguage' || it.key === 'noteLanguage')) this.display();
+          };
           if (it.type === 'toggle') s.addToggle((t) => t.setValue(value).onChange(save));
           else if (it.type === 'dropdown') s.addDropdown((dd) => dd.addOptions(it.options).setValue(value).onChange(save));
           else s.addText((t) => t.setValue(String(value)).setPlaceholder(it.placeholder || '').onChange(save));

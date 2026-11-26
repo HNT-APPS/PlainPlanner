@@ -12,3 +12,6 @@ node_modules/
 .DS_Store
 .vscode/
 .idea/
+
+# Local test vault
+TEST/

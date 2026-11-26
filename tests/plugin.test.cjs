@@ -18,11 +18,16 @@ class Setting {}
 class Notice { constructor(msg) { notices.push(msg); } }
 class TFile { constructor(path) { this.path = path; this.basename = path.replace(/\\.md$/, ''); this.extension = 'md'; } }
 const normalizePath = (p) => p;
-module.exports = { Plugin, PluginSettingTab, Modal, SuggestModal, Setting, Notice, TFile, normalizePath, notices };
+const stub = { Plugin, PluginSettingTab, Modal, SuggestModal, Setting, Notice, TFile, normalizePath, notices };
+stub.appLanguage = 'en';
+stub.getLanguage = () => stub.appLanguage;
+module.exports = stub;
 `);
 fs.copyFileSync(path.join(__dirname, '../main.js'), path.join(tmp, 'main.cjs'));
 const PlainPlannerPlugin = require(path.join(tmp, 'main.cjs'));
-const { TFile } = require(stubDir);
+const obsidianStub = require(stubDir);
+const { TFile } = obsidianStub;
+global.window = { setInterval: () => 0 };
 const d = new Date();
 const TODAY = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -106,8 +111,48 @@ test('note language: Polish for settings from the old version, else follows the 
   assert.equal(old.settings.noteLanguage, 'pl');
   const fresh = makePlugin({}).plugin;
   await fresh.loadState();
-  assert.equal(fresh.settings.noteLanguage, 'en'); // stub has no getLanguage -> English
+  assert.equal(fresh.settings.noteLanguage, 'en'); // app in English
   const chosen = makePlugin({}, { settings: { noteLanguage: 'en' } }).plugin;
   await chosen.loadState();
   assert.equal(chosen.settings.noteLanguage, 'en');
+});
+
+// Runs onload with the Obsidian calls it needs and returns the command names.
+async function loadCommands(saved, appLanguage) {
+  obsidianStub.appLanguage = appLanguage;
+  const { plugin } = makePlugin({}, saved);
+  plugin.app.workspace = { on: () => {}, onLayoutReady: () => {} };
+  const commands = {};
+  plugin.addCommand = (c) => { commands[c.id] = c.name; };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.registerInterval = () => {};
+  await plugin.onload();
+  obsidianStub.appLanguage = 'en';
+  return { plugin, commands };
+}
+
+test('interface language: follows Obsidian on auto, the setting otherwise', async () => {
+  let { commands } = await loadCommands({}, 'pl');
+  assert.equal(commands['generate-month'], 'Rozpisz miesiąc');
+  assert.equal(commands['move-next-month'], 'Przenieś na następny miesiąc (BEZ DATY)');
+  ({ commands } = await loadCommands({}, 'de'));
+  assert.equal(commands['generate-month'], 'Fill in a month');
+  ({ commands } = await loadCommands({ settings: { uiLanguage: 'en', noteLanguage: 'pl' } }, 'pl'));
+  assert.equal(commands['move-next-month'], 'Move to next month (BEZ DATY)'); // note keyword stays in the note language
+});
+
+test('interface language: notices and settings use it', async () => {
+  const { plugin } = await loadCommands({ settings: { uiLanguage: 'en' } }, 'pl');
+  obsidianStub.notices.length = 0;
+  await plugin.undoLast();
+  assert.deepEqual(obsidianStub.notices, ['Plain Planner: nothing to undo.']);
+  const tab = new PlainPlannerPlugin.PlainPlannerSettingTab(plugin.app, plugin);
+  const groups = tab.getSettingDefinitions();
+  assert.equal(groups[0].heading, 'Files');
+  assert.equal(groups[0].items[0].name, 'Interface language');
+  await tab.setControlValue('uiLanguage', 'pl');
+  assert.equal(tab.getSettingDefinitions()[0].heading, 'Pliki');
+  await tab.setControlValue('uiLanguage', 'xx');
+  assert.equal(plugin.settings.uiLanguage, 'pl');
 });
