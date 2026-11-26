@@ -670,44 +670,32 @@ test('daily note: text above the plan and under an own # / ## heading below it i
   assert.deepEqual(core.parseDaily('# Title\n## Notes\nx\n', T).preamble, ['# Title', '## Notes', 'x', '']);
 });
 
-test('cheat sheet: a collapsed callout with hotkeys, kept above the plan', () => {
-  const hk = { 'plain-planner:generate-month': [{ modifiers: ['Shift', 'Mod'], key: 'm' }] };
-  const sheet = core.buildCheatSheet('pl', 'pl', hk, false);
-  const lines = sheet.split('\n');
-  assert.equal(lines[0], '> [!plain-planner]- Plain Planner – ściąga komend');
-  assert.ok(lines[1].startsWith('> Możesz ją usunąć'));
-  assert.equal(lines[2], '> - Paleta komend: Ctrl + P, potem wpisz „Plain Planner”');
-  assert.equal(lines[3], '> - Rozpisz miesiąc: Ctrl + Shift + M');
-  assert.ok(lines.includes('> - Przenieś na następny miesiąc (BEZ DATY): brak skrótu'));
-  assert.deepEqual(lines.slice(-4), ['> Skróty ustawisz w: Ustawienia → Skróty klawiszowe, wyszukaj „Plain Planner”.', '', '---', '']);
+test('cheat sheet: rows with current hotkeys, a block above the plan', () => {
+  const hk = { 'plain-planner:generate-month': [{ modifiers: ['Shift', 'Mod'], key: 'm' }], 'plain-planner:review': [] };
+  const rows = core.cheatEntries('pl', 'pl', hk, false);
+  assert.deepEqual(rows[0], { label: 'Paleta komend', combos: [['Ctrl', 'P']], after: 'potem wpisz „Plain Planner”' });
+  assert.deepEqual(rows[1], { label: 'Rozpisz miesiąc', combos: [['Ctrl', 'Shift', 'M']], after: null });
+  assert.deepEqual(rows.find((r) => r.label === 'Przegląd zaległych dni').combos, []);
+  assert.equal(rows.find((r) => r.label === 'Przenieś na następny miesiąc (BEZ DATY)').after,
+    'też w menu prawego przycisku (na telefonie: przytrzymaj)');
+  assert.equal(rows.length, core.CHEAT_COMMANDS.length + 1);
+  assert.deepEqual(rows.map((r) => r.label), [
+    'Paleta komend', 'Rozpisz miesiąc', 'Cofnij ostatnie rozpisanie', 'Przegląd zaległych dni',
+    'Zapomnij rozpisane dni (rozpisz od nowa)', 'Przenieś na następny miesiąc (BEZ DATY)',
+    'Pokaż święta w tym tygodniu', 'Dodaj rutyny roczne do końca roku', 'Uruchom teraz (jak przy starcie Obsidiana)',
+  ]);
+  const en = core.cheatEntries('en', 'pl', { 'command-palette:open': [] }, true);
+  assert.deepEqual(en[0].combos, []);
+  assert.ok(en.some((r) => r.label === 'Move to next month (BEZ DATY)'));
   assert.equal(core.formatHotkey({ modifiers: ['Mod', 'Alt'], key: 'F5' }, true), 'Cmd + Option + F5');
-  const model = core.parseDaily(sheet, T);
-  assert.equal(core.serializeDaily(model), sheet);
-  core.generateMonth(model, src(), 2026, 11, T, core.newState());
-  assert.ok(core.serializeDaily(model).startsWith(sheet));
-});
 
-test('cheat sheet: updated in place, deleted lines stay deleted, no sheet -> no change', () => {
-  const sheet = core.buildCheatSheet('pl', 'pl', {}, false).replace(']-', ']+'); // user keeps it expanded
-  const kept = sheet.split('\n').filter((l) => !l.startsWith('> - Cofnij')).join('\n') + 'moje\n';
-  const hk = { 'plain-planner:review': [{ modifiers: ['Alt'], key: 'R' }], 'command-palette:open': [] };
-  const out = core.updateCheatSheet(kept, 'pl', 'pl', hk, false);
-  assert.ok(out.includes('> - Przegląd zaległych dni: Alt + R'));
-  assert.ok(out.includes('> - Paleta komend: brak skrótu, potem wpisz „Plain Planner”'));
-  assert.ok(out.startsWith('> [!plain-planner]+ '));
-  assert.ok(!out.includes('Cofnij ostatnie'));
-  assert.ok(out.endsWith('moje\n'));
-  assert.equal(core.updateCheatSheet(out, 'pl', 'pl', hk, false), out);
-  // Language switch rewrites labels, title, note and hint.
-  const en = core.updateCheatSheet(out, 'en', 'en', hk, false);
-  assert.ok(en.includes('> - Review past days: Alt + R'));
-  assert.ok(en.includes('> - Move to next month (NO DATE): no hotkey'));
-  assert.ok(en.includes('> Set hotkeys in: Settings → Hotkeys'));
-  assert.ok(!/[ąęółśżźćń]/.test(en.split('---')[0]));
-  // Below the plan, or no sheet at all: untouched.
-  const below = '## **LISTOPAD**\n> [!plain-planner]- x\n> - Przegląd zaległych dni: a\n';
-  assert.equal(core.updateCheatSheet(below, 'pl', 'pl', hk, false), below);
-  assert.equal(core.updateCheatSheet('notes\n', 'pl', 'pl', hk, false), 'notes\n');
+  const block = core.cheatSheetBlock('pl');
+  const lines = block.split('\n');
+  assert.equal(lines[0], '```plain-planner');
+  assert.deepEqual(lines.slice(-4), ['```', '', '---', '']); // blank line: "---" right under text would be a heading
+  const model = core.parseDaily(block, T);
+  core.generateMonth(model, src(), 2026, 11, T, core.newState());
+  assert.ok(core.serializeDaily(model).startsWith(block));
 });
 
 test('fill in a month again after its section was removed (e.g. Ctrl+Z)', () => {

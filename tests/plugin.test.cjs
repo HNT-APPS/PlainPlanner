@@ -16,10 +16,11 @@ class Modal {}
 class SuggestModal {}
 class FuzzySuggestModal {}
 class Setting {}
+class MarkdownRenderChild { constructor(el) { this.containerEl = el; } }
 class Notice { constructor(msg) { notices.push(msg); } }
 class TFile { constructor(path) { this.path = path; this.basename = path.replace(/\\.md$/, ''); this.extension = 'md'; } }
 const normalizePath = (p) => p;
-const stub = { Plugin, PluginSettingTab, Modal, SuggestModal, FuzzySuggestModal, Setting, Notice, TFile, normalizePath, notices };
+const stub = { Plugin, PluginSettingTab, Modal, SuggestModal, FuzzySuggestModal, MarkdownRenderChild, Setting, Notice, TFile, normalizePath, notices };
 stub.appLanguage = 'en';
 stub.getLanguage = () => stub.appLanguage;
 module.exports = stub;
@@ -134,6 +135,7 @@ async function loadCommands(saved, appLanguage) {
   plugin.addSettingTab = () => {};
   plugin.registerEvent = () => {};
   plugin.registerInterval = () => {};
+  plugin.registerMarkdownCodeBlockProcessor = () => {};
   await plugin.onload();
   obsidianStub.appLanguage = 'en';
   return { plugin, commands };
@@ -191,7 +193,7 @@ test('setup: renaming a file inside Obsidian updates its setting', async () => {
   assert.equal(plugin.savedData.settings.dailyPath, 'Plan/My plan.md');
 });
 
-test('setup: creates the note with the cheat sheet; hotkey changes update it', async () => {
+test('setup: creates the note with the cheat sheet block; hotkey changes redraw it', async () => {
   const { plugin, files } = makePlugin({}, {});
   await plugin.loadState();
   plugin.app.workspace = { openLinkText: () => {} };
@@ -205,8 +207,13 @@ test('setup: creates the note with the cheat sheet; hotkey changes update it', a
   assert.equal(plugin.settings.dailyPath, 'Plan.md');
   assert.equal(plugin.settings.noteLanguage, 'pl');
   assert.equal(plugin.settings.uiLanguage, 'pl');
-  assert.ok(files['Plan.md'].includes('- Rozpisz miesiąc: brak skrótu'));
+  assert.ok(files['Plan.md'].startsWith('```plain-planner\n'));
+  // Hotkey changes redraw the blocks on screen; the note is not rewritten.
+  const before = files['Plan.md'];
+  const drawn = [];
+  plugin.cheats = new Set([{ render: (hk) => drawn.push(hk) }]);
   files['.obsidian/hotkeys.json'] = JSON.stringify({ 'plain-planner:generate-month': [{ modifiers: ['Mod'], key: 'M' }] });
   await plugin.refreshCheatSheet();
-  assert.ok(files['Plan.md'].includes('- Rozpisz miesiąc: Ctrl + M'));
+  assert.deepEqual(drawn[0]['plain-planner:generate-month'], [{ modifiers: ['Mod'], key: 'M' }]);
+  assert.equal(files['Plan.md'], before);
 });

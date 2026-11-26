@@ -109,12 +109,35 @@
   flex: 1;
 }
 
-/* Command cheat sheet at the top of the daily note: "> [!plain-planner]-" */
-.callout[data-callout="plain-planner"] {
-  --callout-color: var(--callout-quote);
-  --callout-icon: lucide-keyboard;
+/* Command cheat sheet: the ```plain-planner``` block at the top of the daily note */
+.plain-planner-cheat {
   font-size: var(--font-smaller);
+  color: var(--text-muted);
+  border-left: 2px solid var(--background-modifier-border);
+  padding: 0.25em 0.75em;
 }
-.callout[data-callout="plain-planner"] .callout-title {
-  font-size: var(--font-smaller);
+.plain-planner-cheat summary {
+  cursor: pointer;
+  user-select: none;
+}
+.plain-planner-cheat table {
+  margin: 0.4em 0;
+  border-collapse: collapse;
+}
+.plain-planner-cheat td {
+  border: none;
+  padding: 0.1em 1.5em 0.1em 0;
+  vertical-align: top;
+}
+.plain-planner-cheat-keys {
+  white-space: nowrap;
+}
+.plain-planner-cheat-none {
+  font-style: italic;
+}
+.plain-planner-cheat kbd {
+  font-size: 0.9em;
+}
+.plain-planner-cheat p {
+  margin: 0.3em 0;
 }

@@ -1309,7 +1309,7 @@ const UI = {
     setupTitle: 'Plain Planner – pierwsze kroki',
     setupLanguage: 'Język',
     setupLanguageDesc: 'Język okien i komunikatów oraz nazw miesięcy i dni tygodnia w planie.',
-    setupIntro: 'Wtyczka utworzy nową notatkę, w której będzie rozpisywać plan dnia na kolejne miesiące. Na górze znajdziesz zwiniętą ściągę komend, którą możesz usunąć. Możesz też dopisywać własny tekst: nad planem albo pod nim, pod własnym nagłówkiem # lub ##.',
+    setupIntro: 'Wtyczka utworzy nową notatkę, w której będzie rozpisywać plan dnia na kolejne miesiące. Na górze znajdziesz rozwijaną ściągę komend, którą możesz usunąć. Możesz też dopisywać własny tekst: nad planem albo pod nim, pod własnym nagłówkiem # lub ##.',
     setupMissing: 'Nie ma już pliku {path} (usunięty albo przeniesiony poza Obsidianem). Utwórz nowy.',
     setupName: 'Nazwa notatki',
     setupCreateBtn: 'Utwórz',
@@ -1318,9 +1318,11 @@ const UI = {
     setupDone: 'plan dnia będzie w {file}. Użyj komendy „{cmd}”, aby rozpisać miesiąc.',
 
     cheatTitle: 'ściąga komend',
-    cheatNote: 'Możesz ją usunąć. Dopóki tu jest, wtyczka aktualizuje w niej skróty klawiszowe.',
+    cheatNote: 'Możesz usunąć ten blok z notatki: najedź na niego i kliknij </>, albo wejdź w niego strzałkami.',
+    cheatFallback: 'Ściąga komend Plain Planner (widoczna, gdy wtyczka jest włączona).',
     cheatPaletteName: 'Paleta komend',
-    cheatPalette: '{keys}, potem wpisz „Plain Planner”',
+    cheatPaletteAfter: 'potem wpisz „Plain Planner”',
+    cheatMenuAfter: 'też w menu prawego przycisku (na telefonie: przytrzymaj)',
     cheatNone: 'brak skrótu',
     cheatHint: 'Skróty ustawisz w: Ustawienia → Skróty klawiszowe, wyszukaj „Plain Planner”.',
 
@@ -1452,7 +1454,7 @@ const UI = {
     setupTitle: 'Plain Planner – getting started',
     setupLanguage: 'Language',
     setupLanguageDesc: 'Language of the interface and of month and weekday names in your plan.',
-    setupIntro: 'The plugin creates a new note where it writes the day-by-day plan for each month. At the top you will find a collapsed command cheat sheet, which you may delete. You can add your own text too: above the plan, or below it under your own # or ## heading.',
+    setupIntro: 'The plugin creates a new note where it writes the day-by-day plan for each month. At the top you will find an expandable command cheat sheet, which you may delete. You can add your own text too: above the plan, or below it under your own # or ## heading.',
     setupMissing: 'The file {path} no longer exists (deleted, or moved outside Obsidian). Please create a new one.',
     setupName: 'Note name',
     setupCreateBtn: 'Create',
@@ -1461,9 +1463,11 @@ const UI = {
     setupDone: 'the daily plan goes to {file}. Use the "{cmd}" command to fill in a month.',
 
     cheatTitle: 'command cheat sheet',
-    cheatNote: 'You may delete it. While it is here, the plugin keeps its hotkeys up to date.',
+    cheatNote: 'You may delete this block from the note: hover over it and click </>, or move into it with the arrow keys.',
+    cheatFallback: 'Plain Planner command cheat sheet (shown while the plugin is enabled).',
     cheatPaletteName: 'Command palette',
-    cheatPalette: '{keys}, then type "Plain Planner"',
+    cheatPaletteAfter: 'then type "Plain Planner"',
+    cheatMenuAfter: 'also in the right-click menu (on mobile: long press)',
     cheatNone: 'no hotkey',
     cheatHint: 'Set hotkeys in: Settings → Hotkeys, search for "Plain Planner".',
 
@@ -1618,34 +1622,36 @@ function uiDayHead(lang, t, when) {
 
 // --- command cheat sheet ----------------------------------------------------------
 
-// A collapsed callout ("> [!plain-planner]- ...") at the top of a new daily
-// note listing the commands and their hotkeys; styles.css makes it small.
-// The user may delete it or any of its lines; while it is there, the lines
-// that are left are rewritten when hotkeys or the language change. Lines are
-// recognised by their label in any language.
+// A new daily note starts with a ```plain-planner``` code block. The plugin
+// draws it as a small collapsible list of the commands and their current
+// hotkeys, in the interface language, so the note itself never needs to be
+// rewritten. The user may delete the block. Without the plugin it shows as
+// a plain code block holding one line of explanation.
 const CHEAT_COMMANDS = [
   ['generate-month', 'cmdGenerateMonth'],
-  ['yearly-rest', 'cmdYearlyRest'],
+  ['undo-last', 'cmdUndoLast'],
   ['review', 'cmdReview'],
+  ['forget-filled', 'cmdForget'],
   ['move-next-month', 'cmdMoveNextMonth'],
   ['week-alert', 'cmdWeekAlert'],
+  ['yearly-rest', 'cmdYearlyRest'],
   ['run-now', 'cmdRunNow'],
-  ['undo-last', 'cmdUndoLast'],
-  ['forget-filled', 'cmdForget'],
 ];
 const PLUGIN_ID = 'plain-planner';
+const CHEAT_BLOCK = 'plain-planner';
 const PALETTE_ID = 'command-palette:open';
 const PALETTE_DEFAULT = [{ modifiers: ['Mod'], key: 'P' }];
-const CHEAT_TYPE = 'plain-planner';
-const CHEAT_RE = /^>\s*\[!plain-planner\]([-+]?)/i;
 
-// { modifiers: ['Mod', 'Shift'], key: 'M' } -> "Ctrl + Shift + M" (Cmd on macOS).
-function formatHotkey(hk, isMac) {
+// { modifiers: ['Mod', 'Shift'], key: 'M' } -> ['Ctrl', 'Shift', 'M'] (Cmd on macOS).
+function hotkeyParts(hk, isMac) {
   const names = { Mod: isMac ? 'Cmd' : 'Ctrl', Ctrl: 'Ctrl', Meta: isMac ? 'Cmd' : 'Win', Alt: isMac ? 'Option' : 'Alt', Shift: 'Shift' };
   const order = ['Mod', 'Ctrl', 'Meta', 'Alt', 'Shift'];
   const mods = (hk.modifiers || []).slice().sort((a, b) => order.indexOf(a) - order.indexOf(b)).map((m) => names[m] || m);
   const key = hk.key && hk.key.length === 1 ? hk.key.toUpperCase() : hk.key;
-  return [...mods, key].filter(Boolean).join(' + ');
+  return [...mods, key].filter(Boolean);
+}
+function formatHotkey(hk, isMac) {
+  return hotkeyParts(hk, isMac).join(' + ');
 }
 
 // Hotkeys of a command from .obsidian/hotkeys.json (an entry there replaces
@@ -1655,74 +1661,22 @@ function hotkeysOf(hotkeys, id) {
   return id === PALETTE_ID ? PALETTE_DEFAULT : [];
 }
 
-// Every line of the sheet as a { label, value } pair in `lang`, plus, for
-// each line, all labels it may carry in any language.
+// Rows of the sheet: { label, combos: [['Ctrl', 'P'], ...], after }.
 function cheatEntries(lang, noteLang, hotkeys, isMac) {
-  const keysText = (id) => {
-    const list = hotkeysOf(hotkeys, id);
-    return list.length ? list.map((h) => formatHotkey(h, isMac)).join(' / ') : uiText(lang, 'cheatNone');
-  };
-  const variants = (key) => {
-    const out = new Set();
-    for (const l of Object.keys(UI)) for (const n of Object.values(LANGS)) out.add(uiText(l, key, { undated: n.undated }));
-    return out;
-  };
+  const combos = (id) => hotkeysOf(hotkeys, id).map((h) => hotkeyParts(h, isMac));
   const undated = langOf(noteLang).undated;
-  const entries = [{
-    labels: variants('cheatPaletteName'),
-    label: uiText(lang, 'cheatPaletteName'),
-    value: uiText(lang, 'cheatPalette', { keys: keysText(PALETTE_ID) }),
-  }];
+  const rows = [{ label: uiText(lang, 'cheatPaletteName'), combos: combos(PALETTE_ID), after: uiText(lang, 'cheatPaletteAfter') }];
   for (const [id, key] of CHEAT_COMMANDS) {
-    entries.push({ labels: variants(key), label: uiText(lang, key, { undated }), value: keysText(`${PLUGIN_ID}:${id}`) });
+    const after = id === 'move-next-month' ? uiText(lang, 'cheatMenuAfter') : null;
+    rows.push({ label: uiText(lang, key, { undated }), combos: combos(`${PLUGIN_ID}:${id}`), after });
   }
-  return entries;
+  return rows;
 }
 
-const cheatHeader = (lang, fold) => `> [!${CHEAT_TYPE}]${fold} Plain Planner – ${uiText(lang, 'cheatTitle')}`;
-
-function buildCheatSheet(lang, noteLang, hotkeys, isMac) {
-  const lines = [cheatHeader(lang, '-'), `> ${uiText(lang, 'cheatNote')}`];
-  for (const e of cheatEntries(lang, noteLang, hotkeys, isMac)) lines.push(`> - ${e.label}: ${e.value}`);
-  lines.push(`> ${uiText(lang, 'cheatHint')}`, '', '---', '');
-  return lines.join('\n');
-}
-
-// Rewrites the sheet in `text` (the first plain-planner callout above the
-// plan). Returns `text` unchanged when there is no sheet or nothing changes.
-function updateCheatSheet(text, lang, noteLang, hotkeys, isMac) {
-  const lines = splitLines(text);
-  let start = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^#{2,3}(?!#)/.test(lines[i])) break; // the plan starts: no sheet
-    if (CHEAT_RE.test(lines[i])) {
-      start = i;
-      break;
-    }
-  }
-  if (start < 0) return text;
-  const entries = cheatEntries(lang, noteLang, hotkeys, isMac);
-  const fixed = (key) => new Set(Object.keys(UI).map((l) => uiText(l, key)));
-  const notes = fixed('cheatNote');
-  const hints = fixed('cheatHint');
-  let changed = false;
-  for (let i = start; i < lines.length && lines[i].startsWith('>'); i++) {
-    const body = lines[i].replace(/^>\s?/, '');
-    let next = lines[i];
-    if (i === start) next = cheatHeader(lang, CHEAT_RE.exec(lines[i])[1]);
-    else if (notes.has(body.trim())) next = `> ${uiText(lang, 'cheatNote')}`;
-    else if (hints.has(body.trim())) next = `> ${uiText(lang, 'cheatHint')}`;
-    else {
-      const m = /^- (.+?): /.exec(body);
-      const e = m && entries.find((x) => x.labels.has(m[1]));
-      if (e) next = `> - ${e.label}: ${e.value}`;
-    }
-    if (next !== lines[i]) {
-      lines[i] = next;
-      changed = true;
-    }
-  }
-  return changed ? lines.join('\n') : text;
+// Start of a new daily note: the cheat sheet block, then a rule. The blank
+// line matters: "---" right under a text line would turn it into a heading.
+function cheatSheetBlock(lang) {
+  return ['```' + CHEAT_BLOCK, uiText(lang, 'cheatFallback'), '```', '', '---', ''].join('\n');
 }
 
 // A name for a new note typed by the user -> "Name.md", or null when it can
@@ -1748,7 +1702,7 @@ function cleanSetting(item, value) {
 const core = {
   LANGS, ACTIONS, labelText,
   UI, UI_LANG_SETTINGS, resolveUiLang, uiText, uiMonth, uiWeekday, uiDayHead,
-  CHEAT_COMMANDS, formatHotkey, buildCheatSheet, updateCheatSheet, noteFileName,
+  CHEAT_COMMANDS, CHEAT_BLOCK, formatHotkey, cheatEntries, cheatSheetBlock, noteFileName,
   pad2, monthKey, addDays, toIso, parseIso, resolveYear,
   parseWeekly, parseMonthly, parseYearly, parseHolidays, parseSources,
   easterOf, adventOf, tradingSundays, computeCalendar, migrateFilledHolidays, stripWorkOnDaysOff, setLineChecked, uncheckAll,
@@ -1765,7 +1719,7 @@ const core = {
 // ---------------------------------------------------------------------------
 
 if (obsidian) {
-  const { Plugin, PluginSettingTab, Setting, Modal, SuggestModal, Notice, TFile, normalizePath } = obsidian;
+  const { Plugin, PluginSettingTab, Setting, Modal, SuggestModal, MarkdownRenderChild, Notice, TFile, normalizePath } = obsidian;
   const isMac = () => !!(obsidian.Platform && obsidian.Platform.isMacOS);
 
   // Note language for a fresh install: Polish when Obsidian runs in Polish
@@ -1835,6 +1789,9 @@ if (obsidian) {
           .setIcon('calendar-plus')
           .onClick(() => this.moveSelectionToNextMonth(editor)));
       }));
+      this.cheats = new Set();
+      this.cheatOpen = false;
+      this.registerMarkdownCodeBlockProcessor(CHEAT_BLOCK, (_src, el, ctx) => ctx.addChild(new CheatSheet(el, this)));
       // Files renamed or moved inside Obsidian: follow them.
       this.registerEvent(this.app.vault.on('rename', (f, oldPath) => this.onRename(f, oldPath)));
 
@@ -1842,10 +1799,7 @@ if (obsidian) {
         await this.refreshCache();
         this.registerEvent(this.app.vault.on('modify', (f) => this.onModify(f)));
         if (!this.dailyFile()) this.openSetup(true);
-        else {
-          await this.refreshCheatSheet();
-          await this.withUndo(this.t('undoStartup'), () => this.dailyRun(true));
-        }
+        else await this.withUndo(this.t('undoStartup'), () => this.dailyRun(true));
       });
       // Obsidian has no event for hotkey changes; it saves them to
       // hotkeys.json, so watch that file's modification time.
@@ -1940,8 +1894,7 @@ if (obsidian) {
         if (!path) return;
         this.settings.uiLanguage = lang;
         this.settings.noteLanguage = lang;
-        const hotkeys = await this.readHotkeys();
-        await this.app.vault.create(path, buildCheatSheet(lang, lang, hotkeys, isMac()));
+        await this.app.vault.create(path, cheatSheetBlock(lang));
         this.settings.dailyPath = path;
         await this.saveState();
         this.registerCommands();
@@ -1982,15 +1935,11 @@ if (obsidian) {
       await this.refreshCheatSheet();
     }
 
-    // Rewrites the cheat sheet in the daily note, if the user kept it.
+    // Redraws every cheat sheet on screen (hotkeys or language changed).
     async refreshCheatSheet() {
-      const f = this.dailyFile();
-      if (!f) return;
+      if (!this.cheats || !this.cheats.size) return;
       const hotkeys = await this.readHotkeys();
-      const update = (text) => updateCheatSheet(text, this.ui(), this.settings.noteLanguage, hotkeys, isMac());
-      const text = await this.app.vault.read(f);
-      if (update(text) === text) return;
-      await this.app.vault.process(f, update);
+      for (const c of this.cheats) c.render(hotkeys);
     }
 
     async onRename(f, oldPath) {
@@ -2408,6 +2357,53 @@ if (obsidian) {
   }
 
   const LABEL_KEY = { WOLNE: 'labelDayOff', HANDLOWA: 'labelShoppingSunday' };
+
+  // The ```plain-planner``` block: a collapsible list drawn by the plugin.
+  // Being a rendered block, clicking it does not switch the editor to the
+  // block's source, unlike a callout in live preview.
+  class CheatSheet extends MarkdownRenderChild {
+    constructor(el, plugin) {
+      super(el);
+      this.plugin = plugin;
+    }
+    async onload() {
+      this.plugin.cheats.add(this);
+      this.render(await this.plugin.readHotkeys());
+    }
+    onunload() {
+      this.plugin.cheats.delete(this);
+    }
+    render(hotkeys) {
+      const plugin = this.plugin;
+      const lang = plugin.ui();
+      const el = this.containerEl;
+      el.empty();
+      const det = el.createEl('details', { cls: 'plain-planner-cheat' });
+      det.open = plugin.cheatOpen;
+      det.addEventListener('toggle', () => {
+        plugin.cheatOpen = det.open;
+      });
+      det.createEl('summary', { text: `Plain Planner – ${uiText(lang, 'cheatTitle')}` });
+      // Two columns, no header row: command | hotkeys.
+      const body = det.createEl('table').createEl('tbody');
+      for (const row of cheatEntries(lang, plugin.settings.noteLanguage, hotkeys, isMac())) {
+        const tr = body.createEl('tr');
+        tr.createEl('td', { cls: 'plain-planner-cheat-label', text: row.label });
+        const keys = tr.createEl('td', { cls: 'plain-planner-cheat-keys' });
+        if (!row.combos.length) keys.createSpan({ cls: 'plain-planner-cheat-none', text: uiText(lang, 'cheatNone') });
+        row.combos.forEach((combo, i) => {
+          if (i) keys.appendText(' / ');
+          combo.forEach((k, j) => {
+            if (j) keys.appendText(' + ');
+            keys.createEl('kbd', { text: k });
+          });
+        });
+        if (row.after) keys.appendText(`, ${row.after}`);
+      }
+      det.createEl('p', { text: uiText(lang, 'cheatHint') });
+      det.createEl('p', { text: uiText(lang, 'cheatNote') });
+    }
+  }
 
   // First run (or the daily note is gone): language + name of the new daily
   // plan note. `done(path, lang)`; path is null when closed without creating.
