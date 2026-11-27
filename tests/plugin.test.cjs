@@ -55,6 +55,8 @@ function makePlugin(files, saved = { settings: { dailyPath: 'TODO DAILY.md' } })
     },
     configDir: '.obsidian',
     create: async (p, text) => { files[p] = text; tfiles.set(p, new TFile(p)); },
+    folders: [],
+    createFolder: async (p) => { vault.folders.push(p); },
     adapter: {
       exists: async () => true, mkdir: async () => {}, write: async () => {}, list: async () => ({ files: [] }), remove: async () => {},
       read: async (p) => { if (!(p in files)) throw new Error('missing'); return files[p]; },
@@ -279,4 +281,44 @@ test('backlog: the command creates BACKLOG.md on first use, then appends to it',
   cursor = { from: 0, to: 0 };
   await plugin.moveSelectionToBacklog(editor);
   assert.equal(obsidianStub.notices.length, 1, 'a heading is not moved');
+});
+
+test('create a routine: file in the RUTYNY folder, set in the settings, opened; existing file is taken as is', async () => {
+  const { plugin, files, vault } = makePlugin({ 'TODO DAILY.md': '' }, { settings: { dailyPath: 'TODO DAILY.md', noteLanguage: 'pl' } });
+  await plugin.loadState();
+  const opened = [];
+  plugin.app.workspace = { openLinkText: (p) => opened.push(p) };
+  assert.deepEqual(plugin.missingRoutines(), ['weekly', 'monthly', 'yearly', 'holidays']);
+  await plugin.createRoutine('weekly');
+  assert.deepEqual(vault.folders, ['RUTYNY']);
+  assert.ok(files['RUTYNY/RUTYNA TYGODNIOWA.md'].startsWith('## PONIEDZIAŁEK'));
+  assert.equal(plugin.settings.weeklyPath, 'RUTYNY/RUTYNA TYGODNIOWA.md');
+  assert.equal(plugin.savedData.settings.weeklyPath, 'RUTYNY/RUTYNA TYGODNIOWA.md');
+  assert.deepEqual(opened, ['RUTYNY/RUTYNA TYGODNIOWA.md']);
+  assert.deepEqual(plugin.missingRoutines(), ['monthly', 'yearly', 'holidays']);
+
+  files['RUTYNY/ŚWIĘTA.md'] = '24.12 Wigilia\n';
+  const tf = new TFile('RUTYNY/ŚWIĘTA.md');
+  const get = vault.getAbstractFileByPath;
+  vault.getAbstractFileByPath = (p) => (p === tf.path || p === 'RUTYNY' ? tf : get(p));
+  await plugin.createRoutine('holidays');
+  assert.equal(files['RUTYNY/ŚWIĘTA.md'], '24.12 Wigilia\n', 'an existing file is not overwritten');
+  assert.equal(plugin.settings.holidaysPath, 'RUTYNY/ŚWIĘTA.md');
+  assert.deepEqual(vault.folders, ['RUTYNY']);
+});
+
+test('fill in a month / the year: routine changes are checked first', async () => {
+  const { plugin } = makePlugin({ 'TODO DAILY.md': '' });
+  await plugin.loadState();
+  plugin.backup = async () => {};
+  const calls = [];
+  plugin.checkRoutineChanges = async () => calls.push('check');
+  const read = plugin.readSources.bind(plugin);
+  plugin.readSources = async () => { calls.push('read'); return read(); };
+  const t = new Date();
+  await plugin.doGenerate(t.getFullYear(), t.getMonth() + 1, false);
+  assert.deepEqual(calls, ['check', 'read']);
+  calls.length = 0;
+  await plugin.doYearlyRest(false);
+  assert.deepEqual(calls, ['check', 'read']);
 });

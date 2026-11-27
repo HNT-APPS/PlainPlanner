@@ -41,6 +41,8 @@ const LANGS = {
     undated: 'BEZ DATY',
     labels: { WOLNE: 'WOLNE', HANDLOWA: 'HANDLOWA' },
     marker: 'rutyna',
+    routineFolder: 'RUTYNY',
+    routineFiles: { weekly: 'RUTYNA TYGODNIOWA', monthly: 'RUTYNA MIESIĘCZNA', yearly: 'RUTYNA ROCZNA', holidays: 'ŚWIĘTA' },
   },
   en: {
     months: [
@@ -51,6 +53,8 @@ const LANGS = {
     undated: 'NO DATE',
     labels: { WOLNE: 'DAY OFF', HANDLOWA: 'SHOPPING SUNDAY' },
     marker: 'routine',
+    routineFolder: 'ROUTINES',
+    routineFiles: { weekly: 'WEEKLY ROUTINE', monthly: 'MONTHLY ROUTINE', yearly: 'YEARLY ROUTINE', holidays: 'HOLIDAYS' },
   },
 };
 const DEFAULT_LANG = 'pl';
@@ -211,6 +215,15 @@ function headingText(line) {
   const b = /^\s*\*\*(.+?)\*\*\s*:?\s*$/.exec(line);
   return b ? b[1] : null;
 }
+// Obsidian comments (%% ... %%, also over several lines; an unclosed one
+// runs to the end of the file) are blanked out before a routine file is
+// read. Line numbers stay the same, so checkbox sync still finds its lines.
+function maskComments(text) {
+  return text.replace(/%%[\s\S]*?(?:%%|$)/g, (c) => c.replace(/[^\n]/g, ''));
+}
+// A horizontal rule ("---", "***", "___"), e.g. above the example block.
+const RULE_RE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
+
 function stripBullet(line) {
   return line.replace(/^\s*[-*+]\s+(\[[^\]]\]\s+)?/, '').trim();
 }
@@ -218,7 +231,8 @@ function stripBullet(line) {
 function parseWeekly(text) {
   const map = new Map();
   let cur = -1;
-  for (const line of splitLines(text)) {
+  for (const line of splitLines(maskComments(text))) {
+    if (RULE_RE.test(line)) continue;
     const h = headingText(line);
     if (h !== null) {
       cur = weekdayFromName(h);
@@ -234,7 +248,7 @@ function parseWeekly(text) {
 
 function parseMonthly(text) {
   const items = [];
-  splitLines(text).forEach((line, i) => {
+  splitLines(maskComments(text)).forEach((line, i) => {
     const m = SRC_ITEM_RE.exec(line);
     if (!m) return;
     const dm = /^(\d{1,2})\.?\s+(.*)$/.exec(m[4]);
@@ -249,7 +263,7 @@ function parseMonthly(text) {
 function parseYearly(text) {
   const items = [];
   let cur = 0;
-  splitLines(text).forEach((line, i) => {
+  splitLines(maskComments(text)).forEach((line, i) => {
     const h = headingText(line);
     if (h !== null) {
       cur = monthFromName(h);
@@ -286,7 +300,7 @@ const validDM = (d, m) => +m >= 1 && +m <= 12 && +d >= 1 && +d <= 31;
 
 function parseHolidays(text) {
   const items = [];
-  for (const raw of splitLines(text)) {
+  for (const raw of splitLines(maskComments(text))) {
     if (headingText(raw) !== null) continue;
     const task = /^\s*[-*+]\s+\[[^\]]\]\s+/.test(raw);
     const m = HOLIDAY_RE.exec(stripBullet(raw));
@@ -614,7 +628,7 @@ function routinePresence(model) {
 
 function newState() {
   return {
-    filledDays: new Set(), filledYearly: new Set(), skippedYearly: new Set(),
+    filledDays: new Set(), filledYearly: new Set(), skippedYearly: new Set(), placedYearly: new Set(),
     placedHolidays: new Set(), labeledDays: new Set(), strippedDays: new Set(),
   };
 }
@@ -622,7 +636,7 @@ function newState() {
 // The "already written out" memory, saved before a run so "Cofnij ostatnie
 // rozpisanie" can put it back together with the file. Routine snapshots and
 // the week alert are left alone on purpose (undo must not re-ask about them).
-const MARK_KEYS = ['filledDays', 'filledYearly', 'placedHolidays', 'labeledDays', 'strippedDays', 'skippedYearly'];
+const MARK_KEYS = ['filledDays', 'filledYearly', 'placedYearly', 'placedHolidays', 'labeledDays', 'strippedDays', 'skippedYearly'];
 function snapshotMarks(state) {
   const o = {};
   for (const k of MARK_KEYS) o[k] = [...state[k]].sort();
@@ -633,10 +647,11 @@ function restoreMarks(state, marks) {
 }
 
 // Yearly items of month m (in year y): dated ones go under their day, undated
-// ones under "### BEZ DATY" at the end of the month. Runs once per month.
+// ones under "### BEZ DATY" at the end of the month. Each item is placed only
+// once (state.placedYearly), so items added to the file later still show up,
+// while ones you delete from the plan never come back.
 function fillYearly(model, src, y, m, today, state, present) {
   const ymk = monthKey(y, m);
-  if (state.filledYearly.has(ymk)) return 0;
   const todayN = dateNum(today.y, today.m, today.d);
   if (dateNum(y, m, daysInMonth(y, m)) < todayN) return 0;
   let added = 0;
@@ -646,7 +661,7 @@ function fillYearly(model, src, y, m, today, state, present) {
     const period = String(y);
     const ref = pad2(m);
     const key = routineKey('R', period, ref, it.text);
-    if (present.has(key)) continue;
+    if (present.has(key) || state.placedYearly.has(key)) continue;
     const line = makeRoutineLine('R', period, ref, it.text, model.lang);
     if (it.date) {
       let t = { y, m: it.date.m, d: Math.min(it.date.d, daysInMonth(y, it.date.m)) };
@@ -656,9 +671,33 @@ function fillYearly(model, src, y, m, today, state, present) {
       appendLine(undatedExtra(model, y, m).lines, line);
     }
     present.add(key);
+    state.placedYearly.add(key);
     added++;
   }
   state.filledYearly.add(ymk);
+  return added;
+}
+
+// Upgrade from the per-month gate (before 0.15): every item of a month that
+// was already filled in counts as placed, so nothing deleted comes back.
+function migrateFilledYearly(src, months, state) {
+  for (const ymk of months) {
+    const [y, m] = ymk.split('-').map(Number);
+    for (const it of src.yearly) if (it.month === m) state.placedYearly.add(routineKey('R', String(y), pad2(m), it.text));
+  }
+}
+
+// New entries of the yearly routine and the holidays file reach the months
+// already in the plan (run at start-up and by "Run now"). Months that are not
+// in the plan are left to "Fill in a month" / "Fill in the year".
+function fillNewEntries(model, src, today, state) {
+  const present = routinePresence(model);
+  let added = 0;
+  for (const s of [...model.months.values()]) {
+    added += fillHolidays(model, src, s.y, s.m, today, state, present);
+    added += fillYearly(model, src, s.y, s.m, today, state, present);
+  }
+  added += stripWorkOnDaysOff(model, src, today, state);
   return added;
 }
 
@@ -828,6 +867,7 @@ function forgetMonthIfAbsent(model, y, m, state) {
   const keep = (set, belongs) => new Set([...set].filter((v) => !belongs(v)));
   state.filledDays = keep(state.filledDays, (v) => v.startsWith(`${ym}-`));
   state.filledYearly = keep(state.filledYearly, (v) => v === ym);
+  state.placedYearly = keep(state.placedYearly, (v) => v.startsWith(`R|${y}|${pad2(m)}|`));
   state.labeledDays = keep(state.labeledDays, (v) => v.startsWith(`${ym}-`));
   state.strippedDays = keep(state.strippedDays, (v) => v.startsWith(`${ym}-`));
   state.placedHolidays = keep(state.placedHolidays, (v) => v.startsWith(`S|${y}|${pad2(m)}-`));
@@ -929,6 +969,18 @@ function applyWeeklyChange(model, src, oldSnap, state, start) {
         if (idx >= 0) consumed.add(idx);
         return idx >= 0;
       });
+      // A brand-new routine line the day already has stays as it is. This
+      // happens when the day was filled in after the routine was edited but
+      // before the change was picked up (e.g. "Fill in a month" right after
+      // the edit), so the remembered routine is older than the day.
+      const taken = new Set();
+      const already = newL.map((n, i) => {
+        if (origin[i] !== null) return false;
+        const idx = day.lines.findIndex((l, k) => !consumed.has(k) && !taken.has(k) && l.trim() === n);
+        if (idx < 0) return false;
+        taken.add(idx);
+        return true;
+      });
       const off = isDayOff(day);
       // Each new line takes the place of the old line it continues; a brand
       // new line sits right after its predecessor in the routine.
@@ -947,6 +999,10 @@ function applyWeeklyChange(model, src, oldSnap, state, start) {
       let prevOld = -1;
       newL.forEach((n, i) => {
         const o = origin[i];
+        if (already[i]) {
+          anchors.push(null); // already in the day, kept where it is
+          return;
+        }
         if (o !== null && !present[o]) {
           anchors.push(null); // deleted (done) in this day: stays out
           prevOld = o;
@@ -1394,6 +1450,12 @@ const UI = {
     cmdUndoLast: 'Cofnij ostatnie rozpisanie',
     cmdForget: 'Zapomnij rozpisane dni (rozpisz od nowa)',
     cmdSetup: 'Utwórz plik planu dnia i wybierz język',
+    cmdCreateRoutine: 'Utwórz rutynę',
+    routinePickPlaceholder: 'Którą rutynę utworzyć?',
+    routineHolidays: 'Święta i dni wolne',
+    routineCreated: 'utworzono {file}. Wpisz zadania nad linią ---, pod nią jest przykład.',
+    routineLinked: 'plik {file} już istnieje, wtyczka będzie go teraz używać.',
+    routineAllSet: 'wszystkie rutyny są już ustawione (Ustawienia → Plain Planner).',
 
     setupTitle: 'Plain Planner – pierwsze kroki',
     setupLanguage: 'Język',
@@ -1429,6 +1491,7 @@ const UI = {
     undone: 'cofnięto „{label}”. Możesz rozpisać jeszcze raz.',
     noHolidaysThisWeek: 'w tym tygodniu nie ma świąt ani niedziel handlowych.',
     routineChangesApplied: 'zmiany rutyny zastosowane (zmienione miejsca: {n}).',
+    newEntriesAdded: 'nowe wpisy z rutyny rocznej i świąt dodane do planu: {n}.',
     newMonthUnchecked: 'nowy miesiąc – rutyna miesięczna odznaczona.',
     newYearUnchecked: 'nowy rok – rutyna roczna odznaczona.',
     monthFilled: '{month} – nowe dni: {days}, dodane zadania: {added}.',
@@ -1548,6 +1611,12 @@ const UI = {
     cmdUndoLast: 'Undo the last fill-in',
     cmdForget: 'Forget filled-in days (fill in again)',
     cmdSetup: 'Create the daily plan file and choose the language',
+    cmdCreateRoutine: 'Create a routine',
+    routinePickPlaceholder: 'Which routine to create?',
+    routineHolidays: 'Holidays and days off',
+    routineCreated: 'created {file}. Write your tasks above the --- line, an example is below it.',
+    routineLinked: '{file} already exists, the plugin will use it from now on.',
+    routineAllSet: 'all routines are already set (Settings → Plain Planner).',
 
     setupTitle: 'Plain Planner – getting started',
     setupLanguage: 'Language',
@@ -1583,6 +1652,7 @@ const UI = {
     undone: 'undid "{label}". You can fill in again.',
     noHolidaysThisWeek: 'no holidays or shopping Sundays this week.',
     routineChangesApplied: 'routine changes applied (places changed: {n}).',
+    newEntriesAdded: 'new entries from the yearly routine and holidays added to the plan: {n}.',
     newMonthUnchecked: 'new month – monthly routine unchecked.',
     newYearUnchecked: 'new year – yearly routine unchecked.',
     monthFilled: '{month} – new days: {days}, tasks added: {added}.',
@@ -1742,6 +1812,7 @@ const CHEAT_COMMANDS = [
   ['move-to-backlog', 'cmdMoveBacklog'],
   ['week-alert', 'cmdWeekAlert'],
   ['yearly-rest', 'cmdYearlyRest'],
+  ['create-routine', 'cmdCreateRoutine'],
   ['run-now', 'cmdRunNow'],
 ];
 const PLUGIN_ID = 'plain-planner';
@@ -1790,6 +1861,136 @@ function cheatSheetBlock(lang) {
   return ['', '```' + CHEAT_BLOCK, uiText(lang, 'cheatFallback'), '```', '', '---', ''].join('\n');
 }
 
+// --- new routine files -----------------------------------------------------
+
+const ROUTINE_KINDS = ['weekly', 'monthly', 'yearly', 'holidays'];
+const ROUTINE_LABEL = { weekly: 'setWeeklyPath', monthly: 'setMonthlyPath', yearly: 'setYearlyPath', holidays: 'routineHolidays' };
+const ROUTINE_SETTING = { weekly: 'weeklyPath', monthly: 'monthlyPath', yearly: 'yearlyPath', holidays: 'holidaysPath' };
+
+// Example block at the bottom of a new routine file, inside a comment so the
+// plugin does not read it. {work} is the work tag from the settings.
+const ROUTINE_EXAMPLES = {
+  pl: {
+    head: 'PRZYKŁAD. To tylko przykład, możesz go dowolnie usunąć (razem z linią --- nad nim).',
+    weekly: [
+      'Wpisz zadania pod nagłówkiem dnia tygodnia, jedno w linii. Wtyczka dopisze je do każdego takiego dnia w planie:',
+      '',
+      '## PONIEDZIAŁEK',
+      'pranie',
+      'praca {work}',
+      '',
+      'Linie z tagiem {work} wtyczka pomija w dni wolne (tag zmienisz w ustawieniach).',
+      'Po dodaniu lub zmianie zadań uruchom komendę „Uruchom teraz (jak przy starcie Obsidiana)”. Wtyczka zapyta, od kiedy zmiana ma obowiązywać, i dopisze ją do dni, które są już w planie.',
+    ],
+    monthly: [
+      'Jedno zadanie w linii: - [ ], dzień miesiąca i treść. Zadanie pojawi się w planie w tym dniu każdego miesiąca:',
+      '',
+      '- [ ] 10 Zapłać czynsz',
+      '- [ ] 28 Zapłać za telefon',
+      '',
+      'Dzień 31 w krótszym miesiącu trafi na jego ostatni dzień.',
+      'Odhaczenie zadania w planie odhacza je także tutaj. Na początku nowego miesiąca wtyczka odznacza wszystkie.',
+      'Po dodaniu lub zmianie zadań uruchom komendę „Uruchom teraz (jak przy starcie Obsidiana)”. Wtyczka zapyta, od kiedy zmiana ma obowiązywać, i dopisze ją do dni, które są już w planie.',
+    ],
+    yearly: [
+      'Zadania wpisz jako - [ ] pod nazwą miesiąca. Z datą DD.MM trafią na ten dzień, bez daty do bloku BEZ DATY tego miesiąca:',
+      '',
+      '## MARZEC',
+      '- [ ] 15.03 Przegląd samochodu',
+      '- [ ] Zaplanuj wakacje',
+      '',
+      'Odhaczenie zadania w planie odhacza je także tutaj. W nowym roku wtyczka odznacza wszystkie.',
+      'Po dodaniu nowych zadań uruchom komendę „Uruchom teraz (jak przy starcie Obsidiana)”. Wtyczka dopisze je do miesięcy, które są już w planie.',
+    ],
+    holidays: [
+      'Jeden wpis w linii: data i opis. Wpis pojawi się w planie w tym dniu:',
+      '',
+      '24.12 Wigilia #wolne',
+      '11.07.2027 Wesele Ani',
+      '01.08-14.08 Urlop #wolne',
+      'WIELKANOC+60 Boże Ciało #wolne',
+      '- [ ] 20.12 Kup prezenty',
+      '',
+      'DD.MM to data co roku, DD.MM.RRRR tylko w tym roku, DD.MM-DD.MM zakres dni.',
+      'WIELKANOC i ADWENT (pierwsza niedziela Adwentu) można przesunąć o dni, np. WIELKANOC+60 albo ADWENT-1.',
+      'Tag #wolne oznacza dzień wolny: nagłówek dnia w planie dostaje „- WOLNE”, a linie z tagiem {work} są wtedy pomijane.',
+      'Wpis zaczynający się od - [ ] jest zadaniem do odhaczenia, pozostałe są informacją.',
+      'Po dodaniu nowych wpisów uruchom komendę „Uruchom teraz (jak przy starcie Obsidiana)”. Wtyczka dopisze je do miesięcy, które są już w planie.',
+    ],
+  },
+  en: {
+    head: 'EXAMPLE. This is only an example, delete it whenever you like (with the --- line above it).',
+    weekly: [
+      'Write tasks under a weekday heading, one per line. The plugin adds them to every such day in the plan:',
+      '',
+      '## MONDAY',
+      'laundry',
+      'work {work}',
+      '',
+      'Lines with the {work} tag are skipped on days off (change the tag in the settings).',
+      'After adding or changing tasks, run the command "Run now (as on Obsidian start-up)". The plugin asks from when the change applies and adds it to the days already in the plan.',
+    ],
+    monthly: [
+      'One task per line: - [ ], the day of the month and the text. The task appears in the plan on that day of every month:',
+      '',
+      '- [ ] 10 Pay the rent',
+      '- [ ] 28 Pay the phone bill',
+      '',
+      'Day 31 goes to the last day of a shorter month.',
+      'Ticking a task in the plan ticks it here too. At the start of a new month the plugin unticks them all.',
+      'After adding or changing tasks, run the command "Run now (as on Obsidian start-up)". The plugin asks from when the change applies and adds it to the days already in the plan.',
+    ],
+    yearly: [
+      'Write tasks as - [ ] under a month name. With a DD.MM date they go to that day, without one to that month\'s NO DATE block:',
+      '',
+      '## MARCH',
+      '- [ ] 15.03 Car inspection',
+      '- [ ] Plan the holidays',
+      '',
+      'Ticking a task in the plan ticks it here too. In a new year the plugin unticks them all.',
+      'After adding new tasks, run the command "Run now (as on Obsidian start-up)". The plugin adds them to the months already in the plan.',
+    ],
+    holidays: [
+      'One entry per line: a date and a description. The entry appears in the plan on that day:',
+      '',
+      '25.12 Christmas Day #dayoff',
+      '11.07.2027 Anna\'s wedding',
+      '01.08-14.08 Holiday leave #dayoff',
+      'EASTER-2 Good Friday #dayoff',
+      '- [ ] 20.12 Buy presents',
+      '',
+      'DD.MM is a date every year, DD.MM.YYYY only that year, DD.MM-DD.MM a range of days.',
+      'EASTER and ADVENT (the first Sunday of Advent) can be shifted by days, e.g. EASTER+60 or ADVENT-1.',
+      'The #dayoff tag marks a day off: its heading in the plan gets "- DAY OFF" and lines with the {work} tag are skipped.',
+      'An entry starting with - [ ] is a task to tick off, the others are information.',
+      'After adding new entries, run the command "Run now (as on Obsidian start-up)". The plugin adds them to the months already in the plan.',
+    ],
+  },
+};
+
+// Text of a new routine file: empty headings to write into (weekdays from
+// Monday, months), then a rule and the commented-out example. Files without
+// headings start with an empty line: "---" on line 1 would open frontmatter.
+function routineTemplate(kind, lang, workTag) {
+  const l = langOf(lang);
+  const ex = ROUTINE_EXAMPLES[lang] || ROUTINE_EXAMPLES[DEFAULT_LANG];
+  const work = workTag || '#praca';
+  let body;
+  if (kind === 'weekly') body = [1, 2, 3, 4, 5, 6, 0].flatMap((i) => [`## ${l.weekdays[i]}`, '']);
+  else if (kind === 'yearly') body = l.months.flatMap((m) => [`## ${m}`, '']);
+  else body = [''];
+  const example = [ex.head, '', ...ex[kind]].map((line) => line.replace(/\{work\}/g, work));
+  return [...body, '', '---', '%%', ...example, '%%', ''].join('\n');
+}
+
+// "<folder of the daily note>/RUTYNY/RUTYNA TYGODNIOWA.md" (ROUTINES/... in English).
+function routineFilePath(kind, lang, dailyPath) {
+  const l = langOf(lang);
+  const i = (dailyPath || '').lastIndexOf('/');
+  const dir = i >= 0 ? `${dailyPath.slice(0, i)}/` : '';
+  return `${dir}${l.routineFolder}/${l.routineFiles[kind]}.md`;
+}
+
 // A name for a new note typed by the user -> "Name.md", or null when it can
 // not be a file name (empty, a folder separator or a character Obsidian
 // does not allow in links).
@@ -1814,11 +2015,12 @@ const core = {
   LANGS, ACTIONS, labelText,
   UI, UI_LANG_SETTINGS, resolveUiLang, uiText, uiMonth, uiWeekday, uiDayHead,
   CHEAT_COMMANDS, CHEAT_BLOCK, formatHotkey, cheatEntries, cheatSheetBlock, noteFileName,
+  ROUTINE_KINDS, routineTemplate, routineFilePath, maskComments,
   pad2, monthKey, addDays, toIso, parseIso, resolveYear,
   parseWeekly, parseMonthly, parseYearly, parseHolidays, parseSources,
   easterOf, adventOf, tradingSundays, computeCalendar, migrateFilledHolidays, stripWorkOnDaysOff, setLineChecked, uncheckAll,
   parseDaily, serializeDaily, parseRoutineLine, routinePresence,
-  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest, addYearSkeleton, addToBacklog, takeLinesForBacklog, backlogDefaultPath, yearMonths, monthHeaderInfo, forgetMonthIfAbsent,
+  newState, snapshotMarks, restoreMarks, generateMonth, generateYearlyRest, fillNewEntries, migrateFilledYearly, addYearSkeleton, addToBacklog, takeLinesForBacklog, backlogDefaultPath, yearMonths, monthHeaderInfo, forgetMonthIfAbsent,
   collectReview, reviewNeeded, applyReview, moveLinesToNextMonth,
   weeklySnapshot, monthlySnapshot, weekStart, weekAhead, weekSignature, shouldShowWeekAlert, routinesChanged, applyWeeklyChange, applyMonthlyChange,
   checkboxStates, diffStates, applySyncMonthly, applySyncYearly,
@@ -1994,6 +2196,7 @@ if (obsidian) {
         callback: async () => {
           this.state.filledDays = new Set();
           this.state.filledYearly = new Set();
+          this.state.placedYearly = new Set();
           this.state.placedHolidays = new Set();
           this.state.labeledDays = new Set();
           this.state.strippedDays = new Set();
@@ -2006,6 +2209,43 @@ if (obsidian) {
         name: t('cmdSetup'),
         callback: () => this.openSetup(false),
       });
+      this.addCommand({
+        id: 'create-routine',
+        name: t('cmdCreateRoutine'),
+        callback: () => this.pickRoutine(),
+      });
+    }
+
+    // --- new routine ----------------------------------------------------------
+
+    // Routines whose setting does not point to an existing file.
+    missingRoutines() {
+      return ROUTINE_KINDS.filter((k) => !this.file(this.settings[ROUTINE_SETTING[k]]));
+    }
+
+    pickRoutine() {
+      const kinds = this.missingRoutines();
+      if (!kinds.length) return this.say('routineAllSet');
+      new RoutinePickModal(this, kinds).open();
+    }
+
+    // Creates the routine file in the RUTYNY / ROUTINES folder next to the
+    // daily note (or takes the file already there), sets it in the settings
+    // and opens it.
+    async createRoutine(kind) {
+      const vault = this.app.vault;
+      const path = normalizePath(routineFilePath(kind, this.settings.noteLanguage, this.settings.dailyPath));
+      const existed = !!this.file(path);
+      if (!existed) {
+        const dir = path.slice(0, path.lastIndexOf('/'));
+        if (dir && !vault.getAbstractFileByPath(dir)) await vault.createFolder(dir);
+        await vault.create(path, routineTemplate(kind, this.settings.noteLanguage, this.settings.workTag));
+      }
+      this.settings[ROUTINE_SETTING[kind]] = path;
+      await this.saveState();
+      this.app.workspace.openLinkText(path, '', false);
+      const file = path.replace(/\.md$/, '');
+      this.say(existed ? 'routineLinked' : 'routineCreated', { file });
     }
 
     // --- setup --------------------------------------------------------------
@@ -2116,6 +2356,9 @@ if (obsidian) {
         // Pre-0.2 data.json kept a per-month gate for holidays.
         legacyHolidayMonths: raw.placedHolidays ? [] : raw.filledHolidays || [],
         skippedYearly: new Set(raw.skippedYearly || []),
+        placedYearly: new Set(raw.placedYearly || []),
+        // Before 0.15 yearly items had a per-month gate.
+        legacyYearlyMonths: raw.placedYearly ? [] : raw.filledYearly || [],
         lastMonthly: raw.lastMonthly || null,
         lastYearly: raw.lastYearly || null,
         weeklySnapshot: raw.weeklySnapshot || null,
@@ -2141,6 +2384,9 @@ if (obsidian) {
       this.state.placedHolidays = keep(this.state.placedHolidays, holidayIso);
       this.state.labeledDays = keep(this.state.labeledDays, (v) => v.slice(0, 10));
       this.state.strippedDays = keep(this.state.strippedDays, (v) => v);
+      // R|YYYY|MM|text: keep this year and later (the review looks back over it).
+      const year = String(todayNow().y);
+      this.state.placedYearly = new Set([...this.state.placedYearly].filter((k) => k.split('|')[1] >= year));
       const filledDays = [...this.state.filledDays];
       await this.saveData({
         settings: this.settings,
@@ -2150,6 +2396,7 @@ if (obsidian) {
         labeledDays: [...this.state.labeledDays],
         strippedDays: [...this.state.strippedDays],
         skippedYearly: [...this.state.skippedYearly],
+        placedYearly: [...this.state.placedYearly].sort(),
         lastMonthly: this.state.lastMonthly,
         lastYearly: this.state.lastYearly,
         weeklySnapshot: this.state.weeklySnapshot,
@@ -2303,8 +2550,14 @@ if (obsidian) {
           this.state.legacyHolidayMonths = [];
           await this.saveState();
         }
+        if (this.state.legacyYearlyMonths.length) {
+          migrateFilledYearly(await this.readSources(), this.state.legacyYearlyMonths, this.state);
+          this.state.legacyYearlyMonths = [];
+          await this.saveState();
+        }
         await this.resetIfNeeded(today);
         await this.checkRoutineChanges(today);
+        await this.addNewEntries();
         if (this.settings.autoGenerate) {
           await this.runGenerate(today.y, today.m, false);
           await this.runYearlyRest(false);
@@ -2313,6 +2566,17 @@ if (obsidian) {
         this.busy = false;
       }
       if (showReview && this.settings.autoReview) await this.openReview(false);
+    }
+
+    // New yearly routine items and holidays go to months already in the plan.
+    async addNewEntries() {
+      const src = await this.readSources();
+      const res = await this.editDaily((model, today) => {
+        const n = fillNewEntries(model, src, today, this.state);
+        return { n, changed: n > 0 };
+      });
+      await this.saveState();
+      if (res && res.changed) this.say('newEntriesAdded', { n: res.n });
     }
 
     // New month: untick the monthly routine. New year: untick the yearly one.
@@ -2394,6 +2658,9 @@ if (obsidian) {
     }
 
     async doGenerate(y, m, verbose) {
+      // A routine edited since it was last checked is dealt with first, so
+      // the remembered routine matches what the new days are filled from.
+      await this.checkRoutineChanges(todayNow());
       const src = await this.readSources();
       const res = await this.editDaily((model, today) => {
         if (verbose) forgetMonthIfAbsent(model, y, m, this.state);
@@ -2426,6 +2693,7 @@ if (obsidian) {
     }
 
     async doYearlyRest(verbose, nextYear) {
+      await this.checkRoutineChanges(todayNow());
       const src = await this.readSources();
       const res = await this.editDaily((model, today) => {
         const added = generateYearlyRest(model, src, today, this.state, nextYear);
@@ -2808,6 +3076,28 @@ if (obsidian) {
     onClose() {
       this.contentEl.empty();
       this.resolve(this.choice);
+    }
+  }
+
+  class RoutinePickModal extends SuggestModal {
+    constructor(plugin, kinds) {
+      super(plugin.app);
+      this.plugin = plugin;
+      this.kinds = kinds;
+      this.setPlaceholder(plugin.t('routinePickPlaceholder'));
+    }
+    label(kind) {
+      return this.plugin.t(ROUTINE_LABEL[kind]);
+    }
+    getSuggestions(query) {
+      const q = query.trim().toLowerCase();
+      return this.kinds.filter((k) => this.label(k).toLowerCase().includes(q));
+    }
+    renderSuggestion(kind, el) {
+      el.setText(this.label(kind));
+    }
+    onChooseSuggestion(kind) {
+      this.plugin.createRoutine(kind);
     }
   }
 

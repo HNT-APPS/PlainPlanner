@@ -730,7 +730,7 @@ test('cheat sheet: rows with current hotkeys, a block above the plan', () => {
   assert.deepEqual(rows.map((r) => r.label), [
     'Paleta komend', 'Rozpisz miesiąc', 'Cofnij ostatnie rozpisanie', 'Przegląd zaległych dni',
     'Zapomnij rozpisane dni (rozpisz od nowa)', 'Przenieś na następny miesiąc (BEZ DATY)', 'Przenieś do backlogu (2027)',
-    'Pokaż święta w tym tygodniu', 'Rozpisz rok', 'Uruchom teraz (jak przy starcie Obsidiana)',
+    'Pokaż święta w tym tygodniu', 'Rozpisz rok', 'Utwórz rutynę', 'Uruchom teraz (jak przy starcie Obsidiana)',
   ]);
   const en = core.cheatEntries('en', 'pl', { 'command-palette:open': [] }, true);
   assert.deepEqual(en[0].combos, []);
@@ -788,4 +788,104 @@ test('backlog: lines go under "# <year>", sections in year order, other text kep
   assert.deepEqual(t.moved, ['- [ ] rower']);
   assert.equal(t.text, '## **LISTOPAD 2026**\n### 12.11 CZWARTEK\nzostaje\n');
   assert.equal(core.takeLinesForBacklog('### 12.11 CZWARTEK\n', 0, 0), null);
+});
+
+test('new routine files: empty headings, the example is a comment the plugin does not read', () => {
+  assert.equal(core.routineFilePath('weekly', 'pl', 'TODO DAILY.md'), 'RUTYNY/RUTYNA TYGODNIOWA.md');
+  assert.equal(core.routineFilePath('holidays', 'pl', 'Plan/TODO DAILY.md'), 'Plan/RUTYNY/ŚWIĘTA.md');
+  assert.equal(core.routineFilePath('monthly', 'en', 'Daily.md'), 'ROUTINES/MONTHLY ROUTINE.md');
+
+  const weekly = core.routineTemplate('weekly', 'pl', '#praca');
+  assert.ok(weekly.startsWith('## PONIEDZIAŁEK\n'));
+  assert.ok(weekly.includes('\n## NIEDZIELA\n'));
+  assert.ok(weekly.includes('\n---\n%%\nPRZYKŁAD.'));
+  assert.ok(weekly.includes('praca #praca'));
+  assert.ok(weekly.includes('„Uruchom teraz (jak przy starcie Obsidiana)”'));
+  for (const lang of ['pl', 'en']) {
+    for (const kind of core.ROUTINE_KINDS) {
+      assert.ok(/Uruchom teraz|Run now/.test(core.routineTemplate(kind, lang, '#work')), `${lang}/${kind}: points to Run now`);
+    }
+  }
+  const w = core.parseWeekly(weekly);
+  assert.equal(w.size, 7);
+  assert.ok([...w.values()].every((items) => items.length === 0), 'neither --- nor the example becomes a task');
+  // The user's tasks above the rule are read as usual.
+  const filled = weekly.replace('## PONIEDZIAŁEK\n', '## PONIEDZIAŁEK\npranie\n');
+  assert.deepEqual(core.parseWeekly(filled).get(1), ['pranie']);
+
+  for (const lang of ['pl', 'en']) {
+    for (const kind of core.ROUTINE_KINDS) {
+      const text = core.routineTemplate(kind, lang, '#work');
+      assert.ok(!text.startsWith('---'), `${lang}/${kind}: "---" on line 1 would be frontmatter`);
+      const src = core.parseSources(kind === 'weekly' ? text : '', kind === 'monthly' ? text : '', kind === 'yearly' ? text : '', kind === 'holidays' ? text : '');
+      assert.equal(src.monthly.length + src.yearly.length + src.holidays.length, 0, `${lang}/${kind}: example is not read`);
+      assert.equal([...src.weekly.values()].flat().length, 0);
+    }
+  }
+  const yearly = core.routineTemplate('yearly', 'en', '#work');
+  assert.ok(yearly.startsWith('## JANUARY\n'));
+  assert.ok(core.routineTemplate('holidays', 'en', '#work').includes('#dayoff'));
+});
+
+test('comments in routine files are skipped, line numbers kept for checkbox sync', () => {
+  const text = '- [ ] 10 czynsz\n%% - [ ] 11 ukryte %%\n%%\n- [ ] 12 też ukryte\n%%\n- [ ] 14 kopia\n%% bez końca\n- [ ] 20 ukryte';
+  const items = core.parseMonthly(text);
+  assert.deepEqual(items.map((i) => [i.line, i.day]), [[0, 10], [5, 14]]);
+  assert.equal(core.maskComments('a %%b%% c\n%%\nd\n%%').split('\n').length, 4);
+  assert.deepEqual(core.parseHolidays('%%\n24.12 Wigilia\n%%\n25.12 Boże Narodzenie').map((h) => h.text), ['Boże Narodzenie']);
+});
+
+test('new yearly items and holidays reach months already in the plan, deleted ones stay deleted', () => {
+  const st = core.newState();
+  const model = core.parseDaily('', T);
+  core.generateMonth(model, src(), 2026, 11, T, st);
+  core.generateMonth(model, src(), 2026, 12, T, st);
+  // Nothing new: nothing changes.
+  assert.equal(core.fillNewEntries(model, src(), T, st), 0);
+
+  // The user deletes "Cele" from December, then adds items to the files.
+  const dec = model.months.get('2026-12');
+  const undated = dec.extras.find((e) => e.name === 'BEZ DATY');
+  undated.lines = undated.lines.filter((l) => !l.includes('Cele'));
+  const yearly = YEARLY.replace('- [ ] Cele\n', '- [ ] Cele\n- [ ] 20.12 Prezenty\n- [ ] Nowy plan\n') + '**STYCZEŃ:**\n- [ ] Przegląd\n';
+  const s2 = core.parseSources(WEEKLY, MONTHLY, yearly, '18.12 Koncert\n');
+  assert.equal(core.fillNewEntries(model, s2, T, st), 3);
+  const out = core.serializeDaily(model);
+  assert.match(out, /### 20\.12 NIEDZIELA[^\n]*\n(.*\n)*?- \[ \] Prezenty %%rutyna:R:2026:12%%/);
+  assert.match(out, /- \[ \] Nowy plan %%rutyna:R:2026:12%%/);
+  assert.match(out, /### 18\.12 PIĄTEK\nKoncert %%rutyna:S:2026:12-18%%/);
+  assert.doesNotMatch(out, /Cele/, 'a deleted item does not come back');
+  assert.doesNotMatch(out, /Przegląd|STYCZEŃ/, 'a month not in the plan is left alone');
+  assert.equal(core.fillNewEntries(model, s2, T, st), 0);
+});
+
+test('upgrade: yearly items of months filled before 0.15 count as placed', () => {
+  const st = core.newState();
+  const model = core.parseDaily('## **GRUDZIEŃ 2026**\n### BEZ DATY\n', T);
+  core.migrateFilledYearly(src(), ['2026-12'], st);
+  const noTrading = (y) => Object.assign(core.parseSources('', '', y), { tradingSundays: false });
+  assert.equal(core.fillNewEntries(model, noTrading(YEARLY), T, st), 0);
+  const more = YEARLY.replace('- [ ] Cele\n', '- [ ] Cele\n- [ ] Nowe\n');
+  assert.equal(core.fillNewEntries(model, noTrading(more), T, st), 1);
+  assert.match(core.serializeDaily(model), /- \[ \] Nowe %%rutyna:R:2026:12%%/);
+});
+
+test('weekly change: a day filled in after the edit does not get the new line twice', () => {
+  // Wednesday gets "kąpiel" in the routine, the month is filled in before the
+  // change is picked up, then Sunday gets it too and "Run now" applies it.
+  const w0 = '## ŚRODA\nnauka\n## NIEDZIELA\nbieganie\n';
+  const w1 = '## ŚRODA\nnauka\nkąpiel o 19:00\n## NIEDZIELA\nbieganie\n';
+  const w2 = '## ŚRODA\nnauka\nkąpiel o 19:00\n## NIEDZIELA\nbieganie\nkąpiel o 19:00\n';
+  const st = core.newState();
+  const snap = core.weeklySnapshot(core.parseSources(w0).weekly);
+  const model = core.parseDaily('', T);
+  core.generateMonth(model, core.parseSources(w1), 2026, 12, T, st);
+  core.applyWeeklyChange(model, core.parseSources(w2), snap, st, T);
+  const dec = model.months.get('2026-12');
+  assert.deepEqual(dec.days.get(2).lines.filter((l) => l.trim()), ['nauka', 'kąpiel o 19:00']); // Wednesday
+  assert.deepEqual(dec.days.get(6).lines.filter((l) => l.trim()), ['bieganie', 'kąpiel o 19:00']); // Sunday
+  // A routine line written twice on purpose still gets its second copy.
+  const twice = core.parseSources('## ŚRODA\nnauka\nkąpiel o 19:00\nkąpiel o 19:00\n## NIEDZIELA\nbieganie\nkąpiel o 19:00\n');
+  core.applyWeeklyChange(model, twice, core.weeklySnapshot(core.parseSources(w2).weekly), st, T);
+  assert.deepEqual(dec.days.get(2).lines.filter((l) => l.trim()), ['nauka', 'kąpiel o 19:00', 'kąpiel o 19:00']);
 });
