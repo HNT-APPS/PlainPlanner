@@ -193,6 +193,27 @@ test('setup: renaming a file inside Obsidian updates its setting', async () => {
   assert.equal(plugin.savedData.settings.dailyPath, 'Plan/My plan.md');
 });
 
+test('backlog: renaming it or moving the daily note keeps the same backlog file', async () => {
+  // Backlog renamed (e.g. an icon added to its name).
+  const a = makePlugin({ 'TODO DAILY.md': '', 'BACKLOG.md': '' }).plugin;
+  await a.loadState();
+  await a.onRename(new TFile('📦 BACKLOG.md'), 'BACKLOG.md');
+  assert.equal(a.backlogPath(), '📦 BACKLOG.md');
+  assert.equal(a.savedData.settings.backlogPath, '📦 BACKLOG.md');
+  // Daily note moved to a folder while the backlog stays where it was.
+  const b = makePlugin({ 'TODO DAILY.md': '', 'BACKLOG.md': '' }).plugin;
+  await b.loadState();
+  await b.onRename(new TFile('Plan/TODO DAILY.md'), 'TODO DAILY.md');
+  assert.equal(b.settings.dailyPath, 'Plan/TODO DAILY.md');
+  assert.equal(b.backlogPath(), 'BACKLOG.md');
+  // No backlog yet: it still follows the daily note.
+  const c = makePlugin({ 'TODO DAILY.md': '' }).plugin;
+  await c.loadState();
+  await c.onRename(new TFile('Plan/TODO DAILY.md'), 'TODO DAILY.md');
+  assert.equal(c.settings.backlogPath, '');
+  assert.equal(c.backlogPath(), 'Plan/BACKLOG.md');
+});
+
 test('setup: creates the note with the cheat sheet block; hotkey changes redraw it', async () => {
   const { plugin, files } = makePlugin({}, {});
   await plugin.loadState();
@@ -207,7 +228,7 @@ test('setup: creates the note with the cheat sheet block; hotkey changes redraw 
   assert.equal(plugin.settings.dailyPath, 'Plan.md');
   assert.equal(plugin.settings.noteLanguage, 'pl');
   assert.equal(plugin.settings.uiLanguage, 'pl');
-  assert.ok(files['Plan.md'].startsWith('```plain-planner\n'));
+  assert.ok(files['Plan.md'].startsWith('\n```plain-planner\n'));
   // Hotkey changes redraw the blocks on screen; the note is not rewritten.
   const before = files['Plan.md'];
   const drawn = [];

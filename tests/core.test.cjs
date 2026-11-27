@@ -739,11 +739,16 @@ test('cheat sheet: rows with current hotkeys, a block above the plan', () => {
 
   const block = core.cheatSheetBlock('pl');
   const lines = block.split('\n');
-  assert.equal(lines[0], '```plain-planner');
+  assert.equal(lines[0], ''); // cursor lands on line 1 when the note opens; keep it off the block
+  assert.equal(lines[1], '```plain-planner');
   assert.deepEqual(lines.slice(-4), ['```', '', '---', '']); // blank line: "---" right under text would be a heading
   const model = core.parseDaily(block, T);
   core.generateMonth(model, src(), 2026, 11, T, core.newState());
   assert.ok(core.serializeDaily(model).startsWith(block));
+  // A note whose blank first line was deleted gets it back on the next write.
+  const noBlank = core.parseDaily(block.slice(1), T);
+  core.generateMonth(noBlank, src(), 2026, 11, T, core.newState());
+  assert.ok(core.serializeDaily(noBlank).startsWith(block));
 });
 
 test('fill in a month again after its section was removed (e.g. Ctrl+Z)', () => {

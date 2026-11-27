@@ -587,6 +587,9 @@ function serializeDaily(model) {
     out.push(...model.tail);
   }
   while (out.length && !out[out.length - 1].trim()) out.pop();
+  // Obsidian opens a note with the cursor on line 1. A code block there (the
+  // cheat sheet) would show its source in live preview, so keep line 1 empty.
+  if (out.length && /^\s*(```|~~~)/.test(out[0])) out.unshift('');
   return out.join('\n') + '\n';
 }
 
@@ -1778,10 +1781,13 @@ function cheatEntries(lang, noteLang, hotkeys, isMac, year) {
   return rows;
 }
 
-// Start of a new daily note: the cheat sheet block, then a rule. The blank
-// line matters: "---" right under a text line would turn it into a heading.
+// Start of a new daily note: an empty line, the cheat sheet block, then a
+// rule. Obsidian opens a note with the cursor on line 1; in live preview a
+// cursor on the block's fence shows its source instead of the sheet, so the
+// block starts on line 2. The blank line before "---" matters too: "---"
+// right under a text line would turn it into a heading.
 function cheatSheetBlock(lang) {
-  return ['```' + CHEAT_BLOCK, uiText(lang, 'cheatFallback'), '```', '', '---', ''].join('\n');
+  return ['', '```' + CHEAT_BLOCK, uiText(lang, 'cheatFallback'), '```', '', '---', ''].join('\n');
 }
 
 // A name for a new note typed by the user -> "Name.md", or null when it can
@@ -2069,6 +2075,19 @@ if (obsidian) {
 
     async onRename(f, oldPath) {
       let changed = false;
+      // A backlog with no path of its own sits next to the daily note. Pin
+      // it down before anything moves, so renaming the backlog or moving the
+      // daily note keeps writing to the same file instead of a new one.
+      if (!this.settings.backlogPath) {
+        const own = this.backlogPath();
+        if (oldPath === own) {
+          this.settings.backlogPath = f.path;
+          changed = true;
+        } else if (this.settings.dailyPath && normalizePath(this.settings.dailyPath) === oldPath && this.file(own)) {
+          this.settings.backlogPath = own;
+          changed = true;
+        }
+      }
       for (const k of PATH_KEYS) {
         if (this.settings[k] && normalizePath(this.settings[k]) === oldPath) {
           this.settings[k] = f.path;
