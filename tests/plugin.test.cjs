@@ -172,7 +172,6 @@ test('setup: asked for when no daily note is set or it is gone, routine files ar
   const fresh = makePlugin({}, {}).plugin;
   await fresh.loadState();
   assert.equal(fresh.settings.dailyPath, '');
-  assert.equal(fresh.settings.autoGenerate, false);
   assert.equal(fresh.dailyFile(), null);
   let asked = 0;
   fresh.openSetup = () => { asked++; };
@@ -291,7 +290,7 @@ test('create a routine: file in the RUTYNY folder, set in the settings, opened; 
   assert.deepEqual(plugin.missingRoutines(), ['weekly', 'monthly', 'yearly', 'holidays']);
   await plugin.createRoutine('weekly');
   assert.deepEqual(vault.folders, ['RUTYNY']);
-  assert.ok(files['RUTYNY/RUTYNA TYGODNIOWA.md'].startsWith('## PONIEDZIAŁEK'));
+  assert.ok(files['RUTYNY/RUTYNA TYGODNIOWA.md'].startsWith('\n%% Po każdej zmianie w tym pliku uruchom komendę „Rozpisz rutyny”'));
   assert.equal(plugin.settings.weeklyPath, 'RUTYNY/RUTYNA TYGODNIOWA.md');
   assert.equal(plugin.savedData.settings.weeklyPath, 'RUTYNY/RUTYNA TYGODNIOWA.md');
   assert.deepEqual(opened, ['RUTYNY/RUTYNA TYGODNIOWA.md']);
@@ -307,18 +306,47 @@ test('create a routine: file in the RUTYNY folder, set in the settings, opened; 
   assert.deepEqual(vault.folders, ['RUTYNY']);
 });
 
-test('fill in a month / the year: routine changes are checked first', async () => {
-  const { plugin } = makePlugin({ 'TODO DAILY.md': '' });
+test('nothing is filled in by itself: start-up leaves the plan alone', async () => {
+  const files = { 'TODO DAILY.md': '', 'W.md': '## PONIEDZIAŁEK\nnauka\n## WTOREK\nnauka\n## ŚRODA\nnauka\n## CZWARTEK\nnauka\n## PIĄTEK\nnauka\n## SOBOTA\nnauka\n## NIEDZIELA\nnauka\n' };
+  const { plugin } = makePlugin(files, { settings: { dailyPath: 'TODO DAILY.md', weeklyPath: 'W.md', autoGenerate: true } });
+  await plugin.loadState();
+  assert.equal(plugin.settings.autoGenerate, undefined, 'the old setting is dropped');
+  plugin.backup = async () => {};
+  plugin.settings.weekAlert = false;
+  await plugin.dailyRun(false);
+  assert.equal(files['TODO DAILY.md'], '');
+});
+
+test('fill in a month writes out the days; fill in routines adds the weekly routine to that month only', async () => {
+  const files = { 'TODO DAILY.md': '', 'W.md': '## PONIEDZIAŁEK\nnauka\n## WTOREK\nnauka\n## ŚRODA\nnauka\n## CZWARTEK\nnauka\n## PIĄTEK\nnauka\n## SOBOTA\nnauka\n## NIEDZIELA\nnauka\n' };
+  const { plugin } = makePlugin(files, { settings: { dailyPath: 'TODO DAILY.md', weeklyPath: 'W.md' } });
   await plugin.loadState();
   plugin.backup = async () => {};
-  const calls = [];
-  plugin.checkRoutineChanges = async () => calls.push('check');
-  const read = plugin.readSources.bind(plugin);
-  plugin.readSources = async () => { calls.push('read'); return read(); };
   const t = new Date();
-  await plugin.doGenerate(t.getFullYear(), t.getMonth() + 1, false);
-  assert.deepEqual(calls, ['check', 'read']);
-  calls.length = 0;
-  await plugin.doYearlyRest(false);
-  assert.deepEqual(calls, ['check', 'read']);
+  const next = new Date(t.getFullYear(), t.getMonth() + 1, 1);
+  await plugin.doGenerate(next.getFullYear(), next.getMonth() + 1, true);
+  const written = files['TODO DAILY.md'];
+  assert.ok(/### 01\./.test(written), 'every day of the month is there');
+  assert.ok(!/nauka/.test(written), 'no weekly routine yet');
+  await plugin.doFillRoutines(next.getFullYear(), next.getMonth() + 1);
+  const days = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  assert.equal((files['TODO DAILY.md'].match(/^nauka$/gm) || []).length, days);
+  const ym = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+  assert.deepEqual(Object.keys(plugin.state.routineMonths), [ym]);
+  // Without weekly / monthly routine files there is nothing to fill in.
+  const bare = makePlugin({ 'TODO DAILY.md': '' }).plugin;
+  await bare.loadState();
+  obsidianStub.notices.length = 0;
+  await bare.doFillRoutines(next.getFullYear(), next.getMonth() + 1);
+  assert.match(obsidianStub.notices[0], /Create a routine|Utwórz rutynę/);
+});
+
+test('every dialog shows the plugin name', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
+  const classes = src.split(/\n  class /).slice(1);
+  const modals = classes.filter((c) => /^\w+ extends Modal\b/.test(c));
+  const pickers = classes.filter((c) => /^\w+ extends SuggestModal\b/.test(c));
+  assert.ok(modals.length >= 5 && pickers.length >= 2);
+  for (const c of modals) assert.match(c, /brand\(contentEl\)/, c.split(' ')[0]);
+  for (const c of pickers) assert.match(c, /setPlaceholder\(`\$\{PLUGIN_NAME\}: /, c.split(' ')[0]);
 });

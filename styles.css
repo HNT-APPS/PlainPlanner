@@ -141,3 +141,14 @@
 .plain-planner-cheat p {
   margin: 0.3em 0;
 }
+.plain-planner-brand {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.03em;
+  margin-bottom: 0.25em;
+}
+.plain-planner-brand + h2,
+.plain-planner-brand + h3 {
+  margin-top: 0;
+}
